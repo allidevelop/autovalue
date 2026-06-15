@@ -233,6 +233,7 @@ async def create_job(
 
 @app.get("/api/jobs")
 def list_jobs() -> dict[str, Any]:
+    _hydrate_recent_jobs_from_disk()
     with JOBS_LOCK:
         ids = sorted(JOBS, reverse=True)
     return {"jobs": [_job_payload(job_id) for job_id in ids[:50]]}
@@ -780,8 +781,114 @@ def _get_job(job_id: str) -> WebJob:
     with JOBS_LOCK:
         job = JOBS.get(job_id)
     if job is None:
+        job = _hydrate_job_from_disk(job_id)
+    if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
     return job
+
+
+def _hydrate_recent_jobs_from_disk(limit: int = 50) -> None:
+    if not WEB_RUNS_ROOT.exists():
+        return
+    run_dirs = sorted((path for path in WEB_RUNS_ROOT.iterdir() if path.is_dir()), reverse=True)
+    for path in run_dirs[:limit]:
+        _hydrate_job_from_disk(path.name)
+
+
+def _hydrate_job_from_disk(job_id: str) -> WebJob | None:
+    with JOBS_LOCK:
+        existing = JOBS.get(job_id)
+    if existing is not None:
+        return existing
+
+    job_dir = WEB_RUNS_ROOT / job_id
+    input_dir = job_dir / "input"
+    output_dir = job_dir / "output"
+    runtime_log = job_dir / "runtime.log"
+    if not job_dir.is_dir() or not output_dir.exists():
+        return None
+
+    events = _read_runtime_events(runtime_log)
+    status = _status_from_events(events)
+    artifacts = _artifacts_from_disk(output_dir)
+    finished_at = _mtime_iso(output_dir / "client_review_reports.zip") or _mtime_iso(runtime_log)
+    error = None
+    if status == "failed":
+        error = "Один или несколько отчетов завершились с ошибкой. Проверьте batch_report.md."
+
+    job = WebJob(
+        id=job_id,
+        status=status,
+        created_at=_created_at_from_job_id(job_id) or _mtime_iso(job_dir) or _now_iso(),
+        input_dir=input_dir,
+        output_dir=output_dir,
+        runtime_log=runtime_log,
+        started_at=_created_at_from_job_id(job_id),
+        finished_at=finished_at if status in {"passed", "failed"} else None,
+        error=error,
+        events=events,
+        artifacts=artifacts,
+    )
+    with JOBS_LOCK:
+        JOBS[job_id] = job
+    return job
+
+
+def _read_runtime_events(runtime_log: Path) -> list[str]:
+    if not runtime_log.exists():
+        return []
+    return runtime_log.read_text(encoding="utf-8", errors="replace").splitlines()
+
+
+def _status_from_events(events: list[str]) -> str:
+    for line in reversed(events):
+        if "Задача завершена: PASS" in line:
+            return "passed"
+        if "Задача завершена: FAIL" in line:
+            return "failed"
+    return "failed" if events else "queued"
+
+
+def _artifacts_from_disk(output_dir: Path) -> list[WebArtifact]:
+    artifacts: list[WebArtifact] = []
+    zip_path = output_dir / "client_review_reports.zip"
+    if zip_path.exists():
+        artifacts.append(WebArtifact(name=zip_path.name, path=zip_path, kind="zip"))
+    review_dir = output_dir / "client_review"
+    if review_dir.exists():
+        for path in sorted(review_dir.iterdir()):
+            if path.is_file():
+                artifacts.append(WebArtifact(name=path.name, path=path, kind=_artifact_kind(path)))
+    return artifacts
+
+
+def _artifact_kind(path: Path) -> str:
+    if path.suffix.lower() == ".docx":
+        return "word"
+    if path.suffix.lower() in {".xls", ".xlsx", ".xlsm"}:
+        return "excel"
+    if path.name.startswith("validation_"):
+        return "validation"
+    if path.name == "batch_report.md":
+        return "report"
+    return "file"
+
+
+def _created_at_from_job_id(job_id: str) -> str | None:
+    match = re.match(r"(\d{8})_(\d{6})_", job_id)
+    if not match:
+        return None
+    try:
+        value = datetime.strptime("".join(match.groups()), "%Y%m%d%H%M%S")
+    except ValueError:
+        return None
+    return value.isoformat(timespec="seconds")
+
+
+def _mtime_iso(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    return datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
 
 
 def _job_payload(job_id: str) -> dict[str, Any]:
