@@ -178,7 +178,9 @@ def extract_intake_from_pdf(
         progress=progress,
     )
     emit_progress(progress, "PDF intake: parsing extracts and technical passports.")
-    extracts = [record for record in (_parse_extract(page, text) for page, text in page_texts.items()) if record]
+    extracts = _backfill_extract_addresses(
+        [record for record in (_parse_extract(page, text) for page, text in page_texts.items()) if record]
+    )
     technical_passports = _parse_technical_passports(page_texts)
     selected_extract = _select_extract(extracts, target_apartment)
     selected_technical = _select_technical_passport(technical_passports, selected_extract, target_apartment)
@@ -421,6 +423,46 @@ def _parse_technical_passports(page_texts: dict[int, str]) -> list[TechnicalPass
         records.append(_parse_technical_group(group_pages, "\n".join(group_texts)))
         idx = j
     return records
+
+
+def _backfill_extract_addresses(records: list[ExtractRecord]) -> list[ExtractRecord]:
+    if not records:
+        return records
+    with_addresses = [record for record in records if record.address_full and record.apartment_number]
+    if not with_addresses:
+        return records
+    patched: list[ExtractRecord] = []
+    for record in records:
+        if record.address_full or not record.apartment_number:
+            patched.append(record)
+            continue
+        source = min(with_addresses, key=lambda item: abs(item.page - record.page))
+        address = _replace_apartment_in_address(source.address_full, record.apartment_number)
+        patched.append(
+            record.model_copy(
+                update={
+                    "address_full": address,
+                    "city": record.city or source.city or _parse_city(address),
+                    "warnings": [*record.warnings, f"address_backfilled_from_page_{source.page}"],
+                }
+            )
+        )
+    return patched
+
+
+def _replace_apartment_in_address(address: str | None, apartment: str) -> str | None:
+    if not address:
+        return None
+    replaced = re.sub(
+        r"((?:квартира|квертира|кв\.?/оф\.?)\s*)\d{1,5}",
+        rf"\g<1>{apartment}",
+        address,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    if replaced == address:
+        replaced = f"{address}, квартира {apartment}"
+    return _normalize_address(replaced)
 
 
 def _parse_technical_group(pages: list[int], text: str) -> TechnicalPassportRecord:
