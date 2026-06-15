@@ -11,6 +11,7 @@ from realtify.paths import find_tessdata_dir, find_tesseract
 
 DEFAULT_OCR_TIMEOUT_SECONDS = 45
 DEFAULT_OCR_PSM = 11
+DEFAULT_OCR_LANG = "ukr"
 
 
 class OcrTimeoutError(RuntimeError):
@@ -27,9 +28,10 @@ def configure_tesseract() -> Path | None:
     return tessdata_dir
 
 
-def ocr_image(image_path: Path, *, lang: str = "ukr+rus+eng", timeout_seconds: int | None = None) -> str:
+def ocr_image(image_path: Path, *, lang: str | None = None, timeout_seconds: int | None = None) -> str:
     tessdata_dir = configure_tesseract()
     timeout = timeout_seconds or _ocr_timeout_seconds()
+    language = lang or _ocr_lang()
     config_parts = []
     if tessdata_dir:
         config_parts.append(f'--tessdata-dir "{tessdata_dir}"')
@@ -38,7 +40,7 @@ def ocr_image(image_path: Path, *, lang: str = "ukr+rus+eng", timeout_seconds: i
         try:
             return pytesseract.image_to_string(
                 image,
-                lang=lang,
+                lang=language,
                 config=" ".join(config_parts),
                 timeout=timeout,
             ).strip()
@@ -70,3 +72,7 @@ def _ocr_psm() -> int:
         except ValueError:
             pass
     return DEFAULT_OCR_PSM
+
+
+def _ocr_lang() -> str:
+    return os.getenv("REALTIFY_OCR_LANG", DEFAULT_OCR_LANG).strip() or DEFAULT_OCR_LANG
