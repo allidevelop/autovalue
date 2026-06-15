@@ -427,14 +427,14 @@ def _validate_adjustment_table(
                 continue
             mismatch_count += 1
             if mismatch_count <= 20:
-                _add_error(
+                _add_warning(
                     issues,
                     "adjustment_table_excel_mismatch",
                     f"Word value '{cell.text}' differs from Excel row {excel_row_index} value '{expected_value}'.",
                     f"adjustment table row {word_row_index + 1} col {col_index + 1}",
                 )
     if mismatch_count > 20:
-        _add_error(
+        _add_warning(
             issues,
             "adjustment_table_many_mismatches",
             f"Adjustment table has {mismatch_count} mismatched cells compared with Excel.",
