@@ -30,12 +30,33 @@ The new progress callback can become the web job event stream.
 ## Recommended MVP Stack
 
 - Backend: `FastAPI`
-- Worker: `RQ + Redis` for MVP, `Celery` later if needed.
-- Frontend: `Next.js` or `React + Vite`.
-- Database: `PostgreSQL`.
+- Worker, first preview: in-process background thread.
+- Worker, production MVP: `RQ + Redis`, `Celery` later if needed.
+- Frontend, first preview: static HTML/CSS/JS served by FastAPI.
+- Frontend, production MVP: `Next.js` or `React + Vite`.
+- Database, first preview: in-memory job registry plus local job folders.
+- Database, production MVP: `PostgreSQL`.
 - File storage MVP: local mounted volume.
 - File storage production: S3-compatible storage.
 - Runtime: Docker Compose.
+
+The first implemented preview lives in `src/realtify_web/app.py` and can be started with:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_web_app.py --host 127.0.0.1 --port 8765
+```
+
+It exposes:
+
+- `GET /`
+- `GET /api/health`
+- `POST /api/jobs`
+- `GET /api/jobs`
+- `GET /api/jobs/{job_id}`
+- `GET /api/jobs/{job_id}/events`
+- `GET /api/jobs/{job_id}/files/{artifact_name}`
+
+Job outputs are written to `web_runs/<job_id>/`.
 
 ## Core Services
 
@@ -200,7 +221,9 @@ Start web architecture now, but keep production Windows `.exe` until Excel COM i
 - Add `/jobs` create/status/events/artifacts endpoints.
 - Run jobs synchronously or with a simple background worker.
 - Store uploaded files and artifacts locally.
-- Reuse existing `run_full_workflow(progress=...)`.
+- Reuse existing `run_batch_workflow(progress=...)`.
+
+Status: implemented as the first preview.
 
 ### Phase 2: Frontend Dashboard
 

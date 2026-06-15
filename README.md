@@ -203,6 +203,16 @@ For manual smoke testing through the UI, use `client_test_files/`: it contains t
 
 The web-version direction is documented in [docs/WEB_ARCHITECTURE_MVP.md](docs/WEB_ARCHITECTURE_MVP.md).
 
+To launch the FastAPI web preview:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_web_app.py --host 127.0.0.1 --port 8765
+```
+
+Then open `http://127.0.0.1:8765`. The web UI accepts a PDF bundle, Excel template, optional Word template, optional link list, object type, and page range. It runs the batch workflow in a background thread, shows timestamped progress events, and publishes a review zip when the job finishes.
+
+Important: full report generation still requires Microsoft Excel COM. On Linux servers the web app can run as a preview and accept uploads, but calculation jobs will fail at the Excel stage until the Excel layer is moved to a Windows worker or replaced with a cross-platform implementation.
+
 To build the Windows `.exe` package:
 
 ```powershell

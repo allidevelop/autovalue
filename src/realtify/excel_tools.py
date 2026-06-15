@@ -3,18 +3,25 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pythoncom
-import win32api
-import win32com.client
-
 
 class ExcelApp:
     def __init__(self, *, visible: bool = False) -> None:
         self.visible = visible
         self.app: Any | None = None
+        self._pythoncom: Any | None = None
 
     def __enter__(self):
+        try:
+            import pythoncom
+            import win32com.client
+        except Exception as exc:
+            raise RuntimeError(
+                "Microsoft Excel COM is unavailable on this machine. "
+                "Run the workflow on Windows with Microsoft Excel installed, "
+                "or use a cross-platform Excel implementation."
+            ) from exc
         pythoncom.CoInitialize()
+        self._pythoncom = pythoncom
         self.app = win32com.client.DispatchEx("Excel.Application")
         self.app.Visible = self.visible
         self.app.DisplayAlerts = False
@@ -24,12 +31,16 @@ class ExcelApp:
         if self.app is not None:
             self.app.Quit()
             self.app = None
-        pythoncom.CoUninitialize()
+        if self._pythoncom is not None:
+            self._pythoncom.CoUninitialize()
+            self._pythoncom = None
 
 
 def excel_path(path: Path) -> str:
     resolved = path.resolve()
     try:
+        import win32api
+
         return win32api.GetShortPathName(str(resolved))
     except Exception:
         return str(resolved)

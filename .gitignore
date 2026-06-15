@@ -6,6 +6,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 outputs/
+web_runs/
 build/
 dist/
 *.spec

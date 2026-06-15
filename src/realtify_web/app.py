@@ -1,0 +1,373 @@
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import shutil
+import threading
+import traceback
+import zipfile
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+
+from realtify.batch_workflow import BatchWorkflowResult, run_batch_workflow
+from realtify.paths import PROJECT_ROOT
+
+
+WEB_RUNS_ROOT = PROJECT_ROOT / "web_runs"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+DEFAULT_WORD_TEMPLATE = PROJECT_ROOT / "config" / "report_templates" / "valuation_report_real_template.docx"
+
+JOBS_LOCK = threading.RLock()
+JOBS: dict[str, "WebJob"] = {}
+
+
+@dataclass
+class WebArtifact:
+    name: str
+    path: Path
+    kind: str
+
+
+@dataclass
+class WebJob:
+    id: str
+    status: str
+    created_at: str
+    input_dir: Path
+    output_dir: Path
+    runtime_log: Path
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    events: list[str] = field(default_factory=list)
+    artifacts: list[WebArtifact] = field(default_factory=list)
+
+
+app = FastAPI(title="Realtify Web", version="0.1.0")
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/api/health")
+def health() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "project_root": str(PROJECT_ROOT),
+        "web_runs_root": str(WEB_RUNS_ROOT),
+        "excel_com_available": _excel_com_available(),
+        "platform": os.name,
+        "default_word_template_exists": DEFAULT_WORD_TEMPLATE.exists(),
+    }
+
+
+@app.post("/api/jobs")
+async def create_job(
+    pdf_file: UploadFile = File(...),
+    excel_template: UploadFile = File(...),
+    word_template: UploadFile | None = File(None),
+    links_file: UploadFile | None = File(None),
+    profile: str = Form("apartment"),
+    complex_name: str | None = Form(None),
+    include_full_screenshots: bool = Form(False),
+    first_page: int | None = Form(None),
+    last_page: int | None = Form(None),
+    required_count: int = Form(5),
+    allow_less: bool = Form(False),
+) -> dict[str, Any]:
+    job_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]
+    job_dir = WEB_RUNS_ROOT / job_id
+    input_dir = job_dir / "input"
+    output_dir = job_dir / "output"
+    runtime_log = job_dir / "runtime.log"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    pdf_path = input_dir / _safe_upload_name(pdf_file.filename, "input.pdf")
+    excel_path = input_dir / _safe_upload_name(excel_template.filename, "template.xls")
+    word_path: Path | None = None
+    links_path: Path | None = None
+
+    await _save_upload(pdf_file, pdf_path)
+    await _save_upload(excel_template, excel_path)
+    if word_template and word_template.filename:
+        word_path = input_dir / _safe_upload_name(word_template.filename, "report_template.docx")
+        await _save_upload(word_template, word_path)
+    if links_file and links_file.filename:
+        links_path = input_dir / _safe_upload_name(links_file.filename, "links.txt")
+        await _save_upload(links_file, links_path)
+
+    if word_path is None and DEFAULT_WORD_TEMPLATE.exists():
+        word_path = DEFAULT_WORD_TEMPLATE
+
+    if word_path is None or not word_path.exists():
+        raise HTTPException(status_code=400, detail="Word template is required and default template is missing.")
+
+    job = WebJob(
+        id=job_id,
+        status="queued",
+        created_at=_now_iso(),
+        input_dir=input_dir,
+        output_dir=output_dir,
+        runtime_log=runtime_log,
+    )
+    with JOBS_LOCK:
+        JOBS[job_id] = job
+    _append_event(job_id, "Задача создана. Файлы сохранены.")
+
+    thread = threading.Thread(
+        target=_run_job,
+        args=(
+            job_id,
+            pdf_path,
+            excel_path,
+            word_path,
+            links_path,
+            profile,
+            complex_name,
+            include_full_screenshots,
+            first_page,
+            last_page,
+            max(1, required_count),
+            allow_less,
+        ),
+        daemon=True,
+        name=f"realtify-web-job-{job_id}",
+    )
+    thread.start()
+    return _job_payload(job_id)
+
+
+@app.get("/api/jobs")
+def list_jobs() -> dict[str, Any]:
+    with JOBS_LOCK:
+        ids = sorted(JOBS, reverse=True)
+    return {"jobs": [_job_payload(job_id) for job_id in ids[:50]]}
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job(job_id: str) -> dict[str, Any]:
+    return _job_payload(job_id)
+
+
+@app.get("/api/jobs/{job_id}/events")
+def get_job_events(job_id: str) -> dict[str, Any]:
+    job = _get_job(job_id)
+    with JOBS_LOCK:
+        events = list(job.events)
+    return {"job_id": job_id, "events": events}
+
+
+@app.get("/api/jobs/{job_id}/files/{artifact_name}")
+def download_artifact(job_id: str, artifact_name: str) -> FileResponse:
+    job = _get_job(job_id)
+    with JOBS_LOCK:
+        artifact = next((item for item in job.artifacts if item.name == artifact_name), None)
+    if artifact is None or not artifact.path.exists():
+        raise HTTPException(status_code=404, detail="Artifact not found.")
+    return FileResponse(artifact.path, filename=artifact.name)
+
+
+def _run_job(
+    job_id: str,
+    pdf_path: Path,
+    excel_path: Path,
+    word_path: Path,
+    links_path: Path | None,
+    profile: str,
+    complex_name: str | None,
+    include_full_screenshots: bool,
+    first_page: int | None,
+    last_page: int | None,
+    required_count: int,
+    allow_less: bool,
+) -> None:
+    _set_job(job_id, status="running", started_at=_now_iso())
+    _append_event(job_id, "Запуск batch workflow: один отчет на каждый объект из PDF.")
+    _append_event(job_id, f"PDF: {pdf_path.name}")
+    _append_event(job_id, f"Excel template: {excel_path.name}")
+    _append_event(job_id, f"Word template: {word_path.name}")
+    _append_event(job_id, f"Profile: {profile}; required analogs: {required_count}")
+    if first_page or last_page:
+        _append_event(job_id, f"Ограничение страниц PDF: {first_page or 1}-{last_page or 'end'}")
+    if not _excel_com_available():
+        _append_event(job_id, "Внимание: Excel COM недоступен на этой машине. Генерация Excel/Word может завершиться ошибкой.")
+
+    try:
+        result = run_batch_workflow(
+            pdf_path=pdf_path,
+            links_path=links_path,
+            template_path=excel_path,
+            output_dir=_get_job(job_id).output_dir,
+            profile=profile,
+            complex_name=complex_name or None,
+            required_count=required_count,
+            allow_less=allow_less,
+            allow_incomplete=False,
+            first_page=first_page,
+            last_page=last_page,
+            visible=False,
+            report_template_path=word_path,
+            include_full_screenshots=include_full_screenshots,
+            progress=lambda message: _append_event(job_id, message),
+        )
+        artifacts = _package_result(job_id, result)
+        status = "passed" if result.ok else "failed"
+        error = None if result.ok else "Один или несколько отчетов завершились с ошибкой. Проверьте batch_report.md."
+        _set_job(job_id, status=status, finished_at=_now_iso(), error=error, artifacts=artifacts)
+        _append_event(job_id, "Задача завершена: " + ("PASS" if result.ok else "FAIL"))
+    except Exception as exc:  # noqa: BLE001 - web job must capture the full failure for the UI.
+        trace = traceback.format_exc()
+        _append_event(job_id, f"Ошибка: {exc}")
+        _append_event(job_id, trace)
+        _set_job(job_id, status="failed", finished_at=_now_iso(), error=str(exc))
+
+
+def _package_result(job_id: str, result: BatchWorkflowResult) -> list[WebArtifact]:
+    job = _get_job(job_id)
+    review_dir = job.output_dir / "client_review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    artifacts: list[WebArtifact] = []
+
+    if result.report_path.exists():
+        batch_report_copy = review_dir / "batch_report.md"
+        shutil.copy2(result.report_path, batch_report_copy)
+        artifacts.append(WebArtifact(name="batch_report.md", path=batch_report_copy, kind="report"))
+
+    for index, item in enumerate(result.objects, start=1):
+        label = _object_label(index, item.apartment, item.extract_page)
+        if item.word_report_path and item.word_report_path.exists():
+            target = review_dir / f"valuation_report_{label}.docx"
+            shutil.copy2(item.word_report_path, target)
+            artifacts.append(WebArtifact(name=target.name, path=target, kind="word"))
+        if item.excel_workflow and item.excel_workflow.excel and item.excel_workflow.excel.output_path.exists():
+            target = review_dir / f"valuation_calculation_{label}{item.excel_workflow.excel.output_path.suffix}"
+            shutil.copy2(item.excel_workflow.excel.output_path, target)
+            artifacts.append(WebArtifact(name=target.name, path=target, kind="excel"))
+        if item.validation and item.validation.validation_md.exists():
+            target = review_dir / f"validation_{label}.md"
+            shutil.copy2(item.validation.validation_md, target)
+            artifacts.append(WebArtifact(name=target.name, path=target, kind="validation"))
+
+    zip_path = job.output_dir / "client_review_reports.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(review_dir.rglob("*")):
+            if path.is_file():
+                archive.write(path, arcname=path.relative_to(review_dir))
+    artifacts.insert(0, WebArtifact(name=zip_path.name, path=zip_path, kind="zip"))
+    _append_event(job_id, f"Архив для проверки: {zip_path}")
+    return artifacts
+
+
+async def _save_upload(upload: UploadFile, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("wb") as handle:
+        shutil.copyfileobj(upload.file, handle)
+
+
+def _safe_upload_name(filename: str | None, fallback: str) -> str:
+    name = Path(filename or fallback).name
+    name = re.sub(r"[^A-Za-z0-9А-Яа-яЇїІіЄєҐґ._ -]+", "_", name, flags=re.UNICODE).strip()
+    return name or fallback
+
+
+def _object_label(index: int, apartment: str | None, page: int | None) -> str:
+    raw = apartment or (f"page_{page}" if page else f"object_{index}")
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", raw).strip("-")
+    return f"apt_{slug}" if apartment else slug
+
+
+def _excel_com_available() -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        import pythoncom  # noqa: F401
+        import win32com.client  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+def _append_event(job_id: str, message: str) -> None:
+    job = _get_job(job_id)
+    line = f"[{datetime.now().strftime('%H:%M:%S')}] {message}"
+    with JOBS_LOCK:
+        job.events.append(line)
+        job.runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        with job.runtime_log.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+
+
+def _set_job(job_id: str, **updates: Any) -> None:
+    job = _get_job(job_id)
+    with JOBS_LOCK:
+        for key, value in updates.items():
+            setattr(job, key, value)
+
+
+def _get_job(job_id: str) -> WebJob:
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return job
+
+
+def _job_payload(job_id: str) -> dict[str, Any]:
+    job = _get_job(job_id)
+    with JOBS_LOCK:
+        events = list(job.events[-250:])
+        artifacts = [
+            {
+                "name": item.name,
+                "kind": item.kind,
+                "url": f"/api/jobs/{job.id}/files/{item.name}",
+                "size": item.path.stat().st_size if item.path.exists() else None,
+            }
+            for item in job.artifacts
+        ]
+    return {
+        "id": job.id,
+        "status": job.status,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+        "error": job.error,
+        "events": events,
+        "artifacts": artifacts,
+        "output_dir": str(job.output_dir),
+    }
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run the Realtify web interface.")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--reload", action="store_true")
+    args = parser.parse_args(argv)
+
+    import uvicorn
+
+    uvicorn.run("realtify_web.app:app", host=args.host, port=args.port, reload=args.reload)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

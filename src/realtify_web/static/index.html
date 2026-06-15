@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Realtify</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #eef3f7;
+      --surface: #ffffff;
+      --surface-soft: #f7fafc;
+      --line: #c7d4df;
+      --line-strong: #93a8ba;
+      --ink: #17212b;
+      --muted: #627386;
+      --brand: #145da0;
+      --brand-strong: #0f4577;
+      --accent: #0f766e;
+      --warn: #a16207;
+      --danger: #b42318;
+      --ok: #16794c;
+      --log: #111827;
+      --log-text: #dbeafe;
+      --focus: rgba(20, 93, 160, 0.2);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--page);
+      color: var(--ink);
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    .shell {
+      width: min(1480px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 24px 0 32px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 0 2px 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 31px;
+      line-height: 1.1;
+      font-weight: 750;
+    }
+
+    .subtitle {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .health {
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      padding: 7px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .health.ok {
+      border-color: rgba(22, 121, 76, 0.45);
+      color: var(--ok);
+    }
+
+    .health.warn {
+      border-color: rgba(161, 98, 7, 0.45);
+      color: var(--warn);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(420px, 0.88fr) minmax(520px, 1.12fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    section {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-soft);
+      color: var(--brand-strong);
+      font-weight: 700;
+    }
+
+    .section-body {
+      padding: 16px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      color: var(--ink);
+      font-weight: 650;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 400;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    input[type="file"],
+    select {
+      width: 100%;
+      min-height: 38px;
+      padding: 7px 9px;
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--ink);
+    }
+
+    input[type="file"] {
+      padding: 7px;
+    }
+
+    input:focus,
+    select:focus,
+    button:focus {
+      outline: 3px solid var(--focus);
+      outline-offset: 1px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .checks {
+      display: grid;
+      gap: 10px;
+      padding: 10px 0 2px;
+    }
+
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-weight: 550;
+    }
+
+    .check input {
+      width: 16px;
+      height: 16px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    button {
+      min-height: 39px;
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      padding: 8px 14px;
+      background: #e8eef5;
+      color: var(--ink);
+      cursor: pointer;
+      font-weight: 650;
+    }
+
+    button.primary {
+      border-color: var(--brand-strong);
+      background: var(--brand);
+      color: #fff;
+    }
+
+    button.secondary {
+      background: #eef6f5;
+      border-color: rgba(15, 118, 110, 0.45);
+      color: var(--accent);
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.62;
+    }
+
+    .status-line {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--surface-soft);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+
+    .pill.running,
+    .pill.queued {
+      color: var(--warn);
+      border-color: rgba(161, 98, 7, 0.45);
+      background: #fff8e7;
+    }
+
+    .pill.passed {
+      color: var(--ok);
+      border-color: rgba(22, 121, 76, 0.45);
+      background: #eefbf4;
+    }
+
+    .pill.failed {
+      color: var(--danger);
+      border-color: rgba(180, 35, 24, 0.45);
+      background: #fff1f1;
+    }
+
+    .job-meta {
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
+    .log {
+      min-height: 430px;
+      max-height: 58vh;
+      margin: 0;
+      padding: 14px 16px;
+      overflow: auto;
+      border: 1px solid #0f172a;
+      border-radius: 4px;
+      background: var(--log);
+      color: var(--log-text);
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    .artifacts {
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .artifact {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 42px;
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface-soft);
+    }
+
+    .artifact a {
+      color: var(--brand-strong);
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+
+    .artifact small {
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .error {
+      display: none;
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      border: 1px solid rgba(180, 35, 24, 0.45);
+      border-radius: 4px;
+      background: #fff1f1;
+      color: var(--danger);
+      font-weight: 650;
+    }
+
+    @media (max-width: 980px) {
+      .shell {
+        width: min(100% - 20px, 760px);
+        padding-top: 16px;
+      }
+
+      .topbar {
+        display: grid;
+        align-items: start;
+      }
+
+      .grid,
+      .row {
+        grid-template-columns: 1fr;
+      }
+
+      .health {
+        white-space: normal;
+      }
+
+      .log {
+        min-height: 320px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <h1>Realtify</h1>
+        <div class="subtitle">PDF -> аналоги -> Excel -> Word -> validation</div>
+      </div>
+      <div id="health" class="health">Проверка среды...</div>
+    </header>
+
+    <div class="grid">
+      <section>
+        <div class="section-head">
+          <span>1. Входные файлы и параметры</span>
+        </div>
+        <div class="section-body">
+          <form id="jobForm" class="form-grid">
+            <label>
+              PDF витяг/техпаспорт
+              <input name="pdf_file" type="file" accept=".pdf" required>
+            </label>
+
+            <label>
+              Excel шаблон
+              <input name="excel_template" type="file" accept=".xls,.xlsx,.xlsm" required>
+            </label>
+
+            <label>
+              Word шаблон
+              <span class="hint">Можно оставить пустым, если на сервере есть стандартный шаблон.</span>
+              <input name="word_template" type="file" accept=".docx">
+            </label>
+
+            <label>
+              Файл ссылок
+              <span class="hint">Необязательно. Если не прикреплен, workflow использует автоматический поиск аналогов.</span>
+              <input name="links_file" type="file" accept=".txt">
+            </label>
+
+            <div class="row">
+              <label>
+                Тип объекта
+                <select name="profile">
+                  <option value="apartment" selected>Квартира</option>
+                  <option value="parking">Паркинг</option>
+                </select>
+              </label>
+
+              <label>
+                Мин. аналогов
+                <input name="required_count" type="number" min="1" max="20" value="5">
+              </label>
+            </div>
+
+            <label>
+              Название ЖК/комплекса
+              <input name="complex_name" type="text" placeholder="Например: ЖК Topolis">
+            </label>
+
+            <div class="row">
+              <label>
+                Первая страница PDF
+                <input name="first_page" type="number" min="1" placeholder="Пусто">
+              </label>
+
+              <label>
+                Последняя страница PDF
+                <input name="last_page" type="number" min="1" placeholder="Пусто">
+              </label>
+            </div>
+
+            <div class="checks">
+              <label class="check">
+                <input name="include_full_screenshots" type="checkbox">
+                Добавить full-page screenshots в Word
+              </label>
+              <label class="check">
+                <input name="allow_less" type="checkbox">
+                Разрешить меньше аналогов, если площадки не дали 5
+              </label>
+            </div>
+
+            <div class="actions">
+              <button id="startButton" type="submit" class="primary">Запустить отчет</button>
+              <button id="refreshButton" type="button" class="secondary">Обновить статус</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <span>2. Выполнение и результат</span>
+        </div>
+        <div class="section-body">
+          <p id="errorBox" class="error"></p>
+          <div class="status-line">
+            <span id="statusPill" class="pill">idle</span>
+            <span id="jobMeta" class="job-meta">Задача еще не запускалась.</span>
+          </div>
+          <pre id="log" class="log">Ожидаю загрузку PDF и шаблонов.</pre>
+          <div id="artifacts" class="artifacts"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const form = document.getElementById("jobForm");
+    const startButton = document.getElementById("startButton");
+    const refreshButton = document.getElementById("refreshButton");
+    const healthEl = document.getElementById("health");
+    const statusPill = document.getElementById("statusPill");
+    const jobMeta = document.getElementById("jobMeta");
+    const logEl = document.getElementById("log");
+    const errorBox = document.getElementById("errorBox");
+    const artifactsEl = document.getElementById("artifacts");
+
+    let currentJobId = null;
+    let pollTimer = null;
+
+    function setError(message) {
+      if (!message) {
+        errorBox.style.display = "none";
+        errorBox.textContent = "";
+        return;
+      }
+      errorBox.style.display = "block";
+      errorBox.textContent = message;
+    }
+
+    function setStatus(status) {
+      statusPill.textContent = status || "idle";
+      statusPill.className = "pill " + (status || "");
+    }
+
+    function formatBytes(value) {
+      if (!value) return "";
+      const units = ["B", "KB", "MB", "GB"];
+      let size = value;
+      let index = 0;
+      while (size > 1024 && index < units.length - 1) {
+        size = size / 1024;
+        index += 1;
+      }
+      return size.toFixed(index === 0 ? 0 : 1) + " " + units[index];
+    }
+
+    function renderJob(job) {
+      currentJobId = job.id;
+      setStatus(job.status);
+      jobMeta.textContent = "Job " + job.id + " | output: " + job.output_dir;
+      logEl.textContent = (job.events && job.events.length ? job.events.join("\n") : "Лог пока пуст.");
+      logEl.scrollTop = logEl.scrollHeight;
+      setError(job.error || "");
+      artifactsEl.innerHTML = "";
+      (job.artifacts || []).forEach((artifact) => {
+        const row = document.createElement("div");
+        row.className = "artifact";
+        const link = document.createElement("a");
+        link.href = artifact.url;
+        link.textContent = artifact.name;
+        link.target = "_blank";
+        const meta = document.createElement("small");
+        meta.textContent = [artifact.kind, formatBytes(artifact.size)].filter(Boolean).join(" | ");
+        row.append(link, meta);
+        artifactsEl.append(row);
+      });
+      if (["passed", "failed"].includes(job.status)) {
+        startButton.disabled = false;
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }
+    }
+
+    async function refreshJob() {
+      if (!currentJobId) return;
+      const response = await fetch("/api/jobs/" + currentJobId);
+      if (!response.ok) throw new Error("Не удалось получить статус задачи");
+      renderJob(await response.json());
+    }
+
+    async function checkHealth() {
+      try {
+        const response = await fetch("/api/health");
+        const health = await response.json();
+        if (health.excel_com_available) {
+          healthEl.className = "health ok";
+          healthEl.textContent = "Excel COM доступен, генерация включена";
+        } else {
+          healthEl.className = "health warn";
+          healthEl.textContent = "Excel COM недоступен: это preview без полного расчета";
+        }
+      } catch (error) {
+        healthEl.className = "health warn";
+        healthEl.textContent = "Не удалось проверить среду";
+      }
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      setError("");
+      startButton.disabled = true;
+      artifactsEl.innerHTML = "";
+      logEl.textContent = "Файлы загружаются...";
+      setStatus("queued");
+
+      const data = new FormData(form);
+      for (const key of ["first_page", "last_page"]) {
+        if (!data.get(key)) data.delete(key);
+      }
+
+      try {
+        const response = await fetch("/api/jobs", { method: "POST", body: data });
+        if (!response.ok) {
+          const errorPayload = await response.json().catch(() => ({}));
+          throw new Error(errorPayload.detail || "Не удалось создать задачу");
+        }
+        renderJob(await response.json());
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(() => refreshJob().catch((error) => setError(error.message)), 2000);
+      } catch (error) {
+        startButton.disabled = false;
+        setStatus("failed");
+        setError(error.message);
+      }
+    });
+
+    refreshButton.addEventListener("click", () => refreshJob().catch((error) => setError(error.message)));
+    checkHealth();
+  </script>
+</body>
+</html>
+
