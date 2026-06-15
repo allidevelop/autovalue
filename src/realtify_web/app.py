@@ -21,6 +21,7 @@ from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
 
+import requests
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -310,11 +311,13 @@ def _run_job(
         error = None if result.ok else "Один или несколько отчетов завершились с ошибкой. Проверьте batch_report.md."
         _set_job(job_id, status=status, finished_at=_now_iso(), error=error, artifacts=artifacts)
         _append_event(job_id, "Задача завершена: " + ("PASS" if result.ok else "FAIL"))
+        _notify_job_finished(job_id)
     except Exception as exc:  # noqa: BLE001 - web job must capture the full failure for the UI.
         trace = traceback.format_exc()
         _append_event(job_id, f"Ошибка: {exc}")
         _append_event(job_id, trace)
         _set_job(job_id, status="failed", finished_at=_now_iso(), error=str(exc))
+        _notify_job_finished(job_id)
 
 
 def _package_result(job_id: str, result: BatchWorkflowResult) -> list[WebArtifact]:
@@ -391,6 +394,62 @@ def _web_pdf_dpi() -> int:
         except ValueError:
             pass
     return 110
+
+
+def _notify_job_finished(job_id: str) -> None:
+    if not _telegram_enabled():
+        return
+    try:
+        _send_telegram_message(_telegram_message(job_id))
+        _append_event(job_id, "Telegram: уведомление о завершении отправлено.")
+    except Exception as exc:  # noqa: BLE001 - notification failure must not break report generation.
+        _append_event(job_id, f"Telegram: не удалось отправить уведомление: {exc}")
+
+
+def _telegram_enabled() -> bool:
+    return bool(os.getenv("REALTIFY_TELEGRAM_BOT_TOKEN") and os.getenv("REALTIFY_TELEGRAM_CHAT_ID"))
+
+
+def _telegram_message(job_id: str) -> str:
+    job = _get_job(job_id)
+    with JOBS_LOCK:
+        status = job.status.upper()
+        started_at = job.started_at or "-"
+        finished_at = job.finished_at or "-"
+        error = job.error
+        artifacts = list(job.artifacts)
+
+    lines = [
+        "Autovalue: отчет завершен",
+        f"Job: {job_id}",
+        f"Status: {status}",
+        f"Started: {started_at}",
+        f"Finished: {finished_at}",
+    ]
+    zip_artifact = next((item for item in artifacts if item.name.endswith(".zip")), None)
+    base_url = (os.getenv("REALTIFY_PUBLIC_BASE_URL") or "").rstrip("/")
+    if zip_artifact and base_url:
+        lines.append(f"Archive: {base_url}/api/jobs/{job_id}/files/{quote(zip_artifact.name)}")
+    if error:
+        lines.append(f"Error: {error}")
+    return "\n".join(lines)
+
+
+def _send_telegram_message(message: str) -> None:
+    token = os.getenv("REALTIFY_TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("REALTIFY_TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return
+    response = requests.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data={
+            "chat_id": chat_id,
+            "text": message,
+            "disable_web_page_preview": "true",
+        },
+        timeout=12,
+    )
+    response.raise_for_status()
 
 
 def _auth_credentials() -> tuple[str, str] | None:

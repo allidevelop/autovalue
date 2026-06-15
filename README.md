@@ -217,6 +217,14 @@ To launch the FastAPI web preview:
 
 Then open `http://127.0.0.1:8765`. The web UI accepts a PDF bundle, Excel template, optional Word template, optional link list, object type, and page range. It runs the batch workflow in a background thread, shows timestamped progress events, and publishes a review zip when the job finishes.
 
+The browser plays a completion sound when a job finishes. The user can also enable browser notifications from the web UI. Telegram notifications are optional and are enabled only when these environment variables are present:
+
+```powershell
+$env:REALTIFY_TELEGRAM_BOT_TOKEN = "123456:telegram-bot-token"
+$env:REALTIFY_TELEGRAM_CHAT_ID = "123456789"
+$env:REALTIFY_PUBLIC_BASE_URL = "https://autovalue.example.com"
+```
+
 Set `REALTIFY_WEB_USERNAME` and `REALTIFY_WEB_PASSWORD` to enable the built-in login page and protect every web route with a signed session cookie:
 
 ```powershell

@@ -350,6 +350,18 @@
       font-weight: 650;
     }
 
+    .range-warning,
+    .notify-note {
+      margin: -4px 0 0;
+      color: var(--warn);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .notify-note {
+      color: var(--muted);
+    }
+
     @media (max-width: 980px) {
       .shell {
         width: min(100% - 20px, 760px);
@@ -456,6 +468,7 @@
                 <input name="last_page" type="number" min="1" placeholder="Пусто">
               </label>
             </div>
+            <p class="range-warning">Если оставить диапазон пустым, система обработает все объекты, найденные в PDF.</p>
 
             <div class="checks">
               <label class="check">
@@ -471,7 +484,9 @@
             <div class="actions">
               <button id="startButton" type="submit" class="primary">Запустить отчет</button>
               <button id="refreshButton" type="button" class="secondary">Обновить статус</button>
+              <button id="notifyButton" type="button" class="secondary">Включить уведомления</button>
             </div>
+            <p id="notifyNote" class="notify-note">После завершения отчета браузер подаст звуковой сигнал.</p>
           </form>
         </div>
       </section>
@@ -497,6 +512,8 @@
     const form = document.getElementById("jobForm");
     const startButton = document.getElementById("startButton");
     const refreshButton = document.getElementById("refreshButton");
+    const notifyButton = document.getElementById("notifyButton");
+    const notifyNote = document.getElementById("notifyNote");
     const healthEl = document.getElementById("health");
     const statusPill = document.getElementById("statusPill");
     const jobMeta = document.getElementById("jobMeta");
@@ -506,6 +523,9 @@
 
     let currentJobId = null;
     let pollTimer = null;
+    let audioContext = null;
+    let browserNotificationsEnabled = false;
+    const completedNotifications = new Set();
 
     function setError(message) {
       if (!message) {
@@ -534,7 +554,73 @@
       return size.toFixed(index === 0 ? 0 : 1) + " " + units[index];
     }
 
-    function renderJob(job) {
+    async function prepareAudio() {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return false;
+      if (!audioContext) audioContext = new AudioContextClass();
+      if (audioContext.state === "suspended") await audioContext.resume();
+      return true;
+    }
+
+    function playTone(frequency, startAt, duration, gainValue) {
+      if (!audioContext) return;
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, startAt);
+      gain.gain.setValueAtTime(0.0001, startAt);
+      gain.gain.exponentialRampToValueAtTime(gainValue, startAt + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+      oscillator.start(startAt);
+      oscillator.stop(startAt + duration + 0.02);
+    }
+
+    async function playCompletionSound(success) {
+      const ready = await prepareAudio().catch(() => false);
+      if (!ready || !audioContext) return;
+      const now = audioContext.currentTime + 0.02;
+      if (success) {
+        playTone(659, now, 0.16, 0.12);
+        playTone(880, now + 0.17, 0.18, 0.11);
+        playTone(1175, now + 0.36, 0.24, 0.1);
+      } else {
+        playTone(392, now, 0.22, 0.12);
+        playTone(262, now + 0.24, 0.32, 0.11);
+      }
+    }
+
+    async function enableNotifications() {
+      const audioReady = await prepareAudio().catch(() => false);
+      if ("Notification" in window && Notification.permission === "default") {
+        browserNotificationsEnabled = (await Notification.requestPermission()) === "granted";
+      } else {
+        browserNotificationsEnabled = "Notification" in window && Notification.permission === "granted";
+      }
+      notifyNote.textContent = browserNotificationsEnabled
+        ? "Уведомления включены: будет звук и системное сообщение браузера."
+        : (audioReady ? "Звук включен. Системные уведомления браузера не разрешены." : "Браузер не дал включить звук автоматически.");
+    }
+
+    function showBrowserNotification(job) {
+      if (!browserNotificationsEnabled || !("Notification" in window) || Notification.permission !== "granted") return;
+      const ok = job.status === "passed";
+      const title = ok ? "Autovalue: отчет готов" : "Autovalue: отчет завершился с ошибкой";
+      const body = "Job " + job.id + (ok ? " успешно завершен." : " требует проверки.");
+      new Notification(title, { body });
+    }
+
+    function notifyIfFinished(job) {
+      if (!["passed", "failed"].includes(job.status)) return;
+      if (completedNotifications.has(job.id)) return;
+      completedNotifications.add(job.id);
+      playCompletionSound(job.status === "passed");
+      showBrowserNotification(job);
+    }
+
+    function renderJob(job, options = {}) {
+      const notify = options.notify !== false;
       currentJobId = job.id;
       setStatus(job.status);
       jobMeta.textContent = "Job " + job.id + " | output: " + job.output_dir;
@@ -556,6 +642,7 @@
       });
       if (["passed", "failed"].includes(job.status)) {
         startButton.disabled = false;
+        if (notify) notifyIfFinished(job);
         if (pollTimer) {
           clearInterval(pollTimer);
           pollTimer = null;
@@ -568,6 +655,19 @@
       const response = await fetch("/api/jobs/" + currentJobId);
       if (!response.ok) throw new Error("Не удалось получить статус задачи");
       renderJob(await response.json());
+    }
+
+    async function loadLatestJob() {
+      const response = await fetch("/api/jobs");
+      if (!response.ok) return;
+      const payload = await response.json();
+      const latest = payload.jobs && payload.jobs.length ? payload.jobs[0] : null;
+      if (!latest) return;
+      renderJob(latest, { notify: false });
+      if (["queued", "running"].includes(latest.status)) {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(() => refreshJob().catch((error) => setError(error.message)), 2000);
+      }
     }
 
     async function checkHealth() {
@@ -604,6 +704,7 @@
       }
 
       try {
+        prepareAudio().catch(() => {});
         const response = await fetch("/api/jobs", { method: "POST", body: data });
         if (!response.ok) {
           const errorPayload = await response.json().catch(() => ({}));
@@ -620,7 +721,9 @@
     });
 
     refreshButton.addEventListener("click", () => refreshJob().catch((error) => setError(error.message)));
+    notifyButton.addEventListener("click", () => enableNotifications().catch((error) => setError(error.message)));
     checkHealth();
+    loadLatestJob().catch(() => {});
   </script>
 </body>
 </html>
