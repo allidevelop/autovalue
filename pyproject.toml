@@ -1,0 +1,41 @@
+[project]
+name = "realtify-tests"
+version = "0.1.0"
+description = "Local workflow for real estate valuation intake, comparable collection, Excel calculation, and report generation."
+requires-python = ">=3.11"
+dependencies = [
+  "beautifulsoup4==4.12.3",
+  "lxml==5.3.0",
+  "olefile==0.47",
+  "pdf2image==1.17.0",
+  "pillow==11.0.0",
+  "playwright==1.49.1",
+  "pydantic==2.10.4",
+  "python-docx==1.1.2",
+  "pypdf==5.1.0",
+  "pytesseract==0.3.13",
+  "pywin32==308; platform_system == 'Windows'",
+  "PyYAML==6.0.2",
+  "requests==2.32.3",
+  "rich==13.9.4",
+]
+
+[project.scripts]
+realtify-check-env = "realtify.env_check:main"
+realtify-discover-links = "realtify.discover_links:main"
+realtify-collect-links = "realtify.collect_from_links:main"
+realtify-fill-excel = "realtify.fill_template:main"
+realtify-extract-intake = "realtify.intake:main"
+realtify-run-excel-workflow = "realtify.workflow:main"
+realtify-run-full-workflow = "realtify.full_workflow:main"
+realtify-prepare-report-template = "realtify.report_template:main"
+realtify-generate-word-report = "realtify.report_generator:main"
+realtify-validate-report = "realtify.report_validator:main"
+realtify-create-real-report-template = "realtify.real_report_template:main"
+realtify-windows-app = "realtify_app.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,120 @@
+defaults:
+  required_count: 5
+  request_timeout_ms: 45000
+  screenshot:
+    full_page: true
+    viewport_width: 1440
+    viewport_height: 1200
+  report_image:
+    enabled: true
+    format: "jpg"
+    max_width_px: 1600
+    jpeg_quality: 82
+
+sources:
+  rieltor:
+    enabled: true
+    priority: 1
+    display_name: "Rieltor.ua"
+    domains:
+      - "rieltor.ua"
+      - "www.rieltor.ua"
+    modes:
+      - "direct_link"
+      - "search_url"
+      - "google_discovery"
+    listing_url_patterns:
+      - "/flats-sale/view/"
+      - "/parking-sale/view/"
+      - "/commercials-sale/view/"
+      - "/homes-sale/view/"
+      - "/houses-sale/view/"
+    search_url_templates:
+      apartment_sale_newbuild:
+        - "https://rieltor.ua/{city_slug}/flats-sale/newhouse/{newbuild_rooms_query}"
+      apartment_sale:
+        - "https://rieltor.ua/{city_slug}/flats-sale/"
+      parking_sale:
+        - "https://rieltor.ua/{city_slug}/parking-sale/"
+      commercial_sale:
+        - "https://rieltor.ua/{city_slug}/commercials-sale/"
+      office_sale:
+        - "https://rieltor.ua/{city_slug}/offices-sale/"
+      house_sale:
+        - "https://rieltor.ua/{city_slug}/houses-sale/"
+    notes: "Primary source for direct listing links and later source-specific search."
+
+  dimria:
+    enabled: true
+    priority: 2
+    display_name: "DIM.RIA"
+    domains:
+      - "dom.ria.com"
+      - "www.dom.ria.com"
+    modes:
+      - "direct_link"
+      - "search_url"
+      - "google_discovery"
+    listing_url_patterns:
+      - "/uk/realty-"
+      - "/realty-"
+    search_url_templates:
+      apartment_sale:
+        - "https://dom.ria.com/uk/prodazha-kvartir/{city_slug}/"
+    notes: "Primary source for direct listing links; has strong listing pages but may vary by locale."
+
+  lun:
+    enabled: true
+    priority: 3
+    display_name: "LUN"
+    domains:
+      - "lun.ua"
+      - "www.lun.ua"
+    modes:
+      - "direct_link"
+      - "google_discovery"
+    listing_url_patterns:
+      - "/"
+    notes: "Useful for market context and new-build pages; direct listing extraction may need source-specific logic."
+
+  olx:
+    enabled: false
+    priority: 4
+    display_name: "OLX"
+    domains:
+      - "olx.ua"
+      - "www.olx.ua"
+    modes:
+      - "direct_link"
+      - "google_discovery"
+    listing_url_patterns:
+      - "/d/uk/obyavlenie/"
+      - "/d/obyavlenie/"
+    notes: "Disabled by default because anti-bot/captcha behavior is common."
+
+  real_estate_lviv:
+    enabled: true
+    priority: 5
+    display_name: "Real Estate Lviv"
+    domains:
+      - "real-estate.lviv.ua"
+      - "www.real-estate.lviv.ua"
+    modes:
+      - "direct_link"
+      - "search_url"
+      - "google_discovery"
+    listing_url_patterns:
+      - "/продаж-квартир/"
+      - "/prodazh-kvartyr/"
+      - "/"
+    notes: "Local Lviv real estate source; start with direct links and screenshots. The site may return 403 to automated browsers, in which case the collector keeps the screenshot as an error and does not use it as a candidate."
+
+  developer_or_agency:
+    enabled: true
+    priority: 10
+    display_name: "Developer or agency site"
+    domains: []
+    modes:
+      - "direct_link"
+    listing_url_patterns: []
+    notes: "Fallback bucket for user-supplied ЖК, developer, or agency listing links."

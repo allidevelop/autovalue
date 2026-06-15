@@ -1,0 +1,62 @@
+target:
+  city: "Київ"
+  address: "Дніпровська набережна, 17-К"
+  complex_name: "ЖК Берег Дніпра"
+  property_type: "apartment"
+  transaction_type: "sale"
+  area_m2: 46.8
+  living_area_m2: 31.5
+  rooms: 1
+  floor_or_level: "28/28"
+  location_quality: "добре"
+  building_class: "Комфорт"
+  condition: "від забудовника"
+  delivery_date: "введений"
+
+documents:
+  mode: "bundle_or_separate"
+  expected_bundle_order: ["extract", "technical_passport"]
+  extract_pdf: "C:/Users/allid/OneDrive/Desktop/DEV/realtify-tests/Діпр.наб. 17-К.pdf"
+  technical_passport_pdf: "C:/Users/allid/OneDrive/Desktop/DEV/realtify-tests/Діпр.наб. 17-К.pdf"
+  report_template: "C:/Users/allid/OneDrive/Desktop/DEV/realtify-tests/Звіт  м. Київ, Дніпровська Набережна, буд. 17-К, кв 375.doc"
+  report_template_format: "doc_to_docx_template"
+  owners_source: "report_template"
+
+template:
+  profile: "apartment"
+  path: "C:/Users/allid/OneDrive/Desktop/DEV/realtify-tests/ДН 15-Ж Аналоги Червень.xls"
+
+collection:
+  mode: "discover"
+  sources_config: "config/sources.yaml"
+  required_count: 5
+  only_newbuilds: true
+  max_discovered_links: 25
+  discovery_pages: 1
+  selection:
+    enabled: true
+    require_city_match: true
+    require_address: true
+    require_area: true
+    require_price_usd: true
+    require_screenshot: true
+    strict_same_rooms: false
+    preferred_area_delta_pct: 35
+    max_area_delta_pct: 50
+  market_overview_enabled: false
+  full_page_screenshots: true
+  report_image_mode: "readable_compressed"
+
+adjustments:
+  bargaining:
+    enabled: false
+    note: "Do not overwrite Корегування на торг in MVP."
+    exposure_months: 3
+    annual_discount_rate_pct: 23
+    annual_market_growth_pct: 5
+    round_to_pct: 1
+
+output:
+  directory: "outputs"
+  word_format: "docx"
+  monthly_folder: true

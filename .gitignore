@@ -1,0 +1,31 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+outputs/
+build/
+dist/
+*.spec
+inputs/*.txt
+inputs/*.json
+!inputs/*.example.txt
+tools/_downloads/
+tools/ms-playwright/
+tools/poppler/
+tools/tessdata/
+
+# Client/source documents and generated review artifacts stay local.
+client_test_files/*
+!client_test_files/README_TEST_RUN.md
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.xlsm
+
+# Keep application templates under version control.
+!config/report_templates/*.docx

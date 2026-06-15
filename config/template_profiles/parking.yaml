@@ -1,0 +1,20 @@
+profile: "parking"
+sheet_name: "Розрахунок вартості"
+fill_range: "A1:G11"
+comparables_columns: ["B", "C", "D", "E", "F"]
+target_column: "G"
+protected_cells:
+  - "B6:F6"
+field_mapping:
+  address: 2
+  area_m2: 3
+  floor_or_level: 4
+  price_usd: 5
+  location_quality: 7
+  building_class: 8
+  purpose: 9
+  delivery_date: 10
+  source_url: 11
+hyperlink_rows:
+  - 11
+

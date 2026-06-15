@@ -1,0 +1,4617 @@
+openapi: 3.0.2
+info:
+  description: >
+    OLX Europe shares public API for its partners. It allows to easily integrate
+    with local sites by posting, managing adverts and communicating with OLX
+    users via internal messaging system. API documentation is the same for every
+    OLX across the Europe.
+
+
+    To help you get started, this is API calls collection to be used with
+    Postman.
+
+
+    [![Run in
+    Postman](https://run.pstmn.io/button.svg)](https://app.getpostman.com/run-collection/3bf2713b8a249cdd917c)
+
+
+    # Versioning
+
+    * Major version is reserved for completely new version or redesigned API
+
+    * Minor version is for potentially backward incompatible changes (e.g. field
+    is removed/added/changed name, etc)
+
+    * We do not support “bugfix” part of the versioning as minor versioning is
+    enough in this case - if bugfix has backward incompatible change, it will
+    bump up minor version.
+
+    * Version is defined using Version header (e.g. If you want to use endpoint
+    in version 2.0, just send request with header “Version: 2.0”).
+
+    * Version header is required.
+
+
+    # Language
+
+    * In multilingual countries (like Ukraine) switching between languages is
+    supported by sending header “Accept-Language: xx” where xx is language code
+
+    * There are two endpoints exposing available languages and currencies (see
+    endpoints references below).
+
+
+
+    # Authentication
+
+
+    ## OAuth 2.0
+
+
+    OLX API implements OAuth2 standard. For more information you can visit
+    https://www.oauth.com/oauth2-servers/definitions/.
+
+
+    Basic principle of OAuth is one point of authorization and accessing all of
+    resources with access token, granting (or not) access to certain endpoints.
+
+
+    OAuth access token is string which should be passed to every request made to
+    OLX API endpoints. Token is valid for certain amount of time, after that
+    application have to send request with refresh token to receive new token.
+
+
+    **Remember** Access token is like password - when someone obtains token,
+    then gains full access to given account, limited only by token scope.
+
+
+    In order to use API partner should request to receive API Client data. One
+    partner may have more than one application eligible for OLX API, each with
+    different set of credentials. Basic API credentials are `client_id` and
+    `client_secret` - both are required regardless of selected authentication
+    method.
+
+
+    ## Credentials
+
+
+    Please store `client_id`, `client_secret` in safe place, as it will be
+    needed to complete configuration and authentication process.
+
+
+    ## How to obtain Access Token
+
+
+    In order to receive token, client should send POST request to
+    `/api/open/oauth/token`. Required fields:
+
+    ```
+
+    {
+      "grant_type": "",
+      "client_id": "",
+      "client_secret": "",
+      "scope": "v2 read write"
+    }
+
+    ```
+
+    `client_id` and `client_secret` are data you have received from OLX business
+    person. `scope` is requested token scope, but limited by partner settings -
+    basically “v2”, “read” and “write”.
+
+
+    Depends on grant type, request should contain other necessary fields.
+
+
+    As response client will receive:
+
+    ```
+
+    {
+      "access_token": "454c3cd39a980500e9b787e03d53ec5c320f644b",
+      "expires_in": 86400,
+      "token_type": "bearer",
+      "scope": "v2 read write",
+      "refresh_token": "12a13560163da7901d7f74c89fc5df3ea7625942"
+    }
+
+    ```
+
+    Access token should be passed with each request to API as header
+    Authorization.
+
+
+    `Authorization: Bearer 454c3cd39a980500e9b787e03d53ec5c320f644b`
+
+
+    Field `expires_in` defines how many more seconds since now (now = last
+    request to oauth/token endpoint) access token will be valid.
+
+
+    Refresh token is valid for one month (2592000 seconds). Also it can be
+    changed when new access token is generated.
+
+
+    Please store access token and refresh token in safe place.
+
+
+    ## Supported grant types
+
+    |Grant Type         |Context      
+    |Actions                                      |
+
+    |-------------------|--------------|---------------------------------------------|
+
+    |authorization_code |User          |Add or fetch adverts adverts / messages,
+    etc.|
+
+    |client_credentials |Client        |Fetch config data: categories, cities,
+    etc.  |
+
+    |refresh_token      |User or
+    Client|                                             |
+
+
+    ## Scopes
+
+
+    Scopes are specific permissions for API usage as a given user type. The
+    authorization and token endpoints allow your application to specify the
+    scope of the access request.
+
+
+    Each API endpoint can demand access token with the specific scope. See the
+    endpoint reference for information about required scope.
+
+
+    Please note your application has closed list of allowed scopes, so you
+    should ensure you are able to ask about given scope and always verify the
+    scopes of issued token.
+
+
+    Default scopes are: v2 read write.
+
+
+    ## Grant type: authorization_code
+
+
+    **Requirements:**
+
+
+    Client must specify Callback URL. You can specify more than one Callback
+    URL. Please avoid special chars like `&` (multiple), `#` in Callback URL.
+
+
+    **Flow:**
+
+
+    On Application site user clicks on button “Authenticate with OLX”.
+
+
+    Auth URL:
+    /oauth/authorize/?client_id=XXX&response_type=code&state=XXX&scope=read
+    write v2&redirect_uri=XXX
+
+
+    Parameter `state` is optional. It will be returned in step 4 so application
+    can validate if response is not crafted by someone else.
+
+
+    Parameter `redirect_uri` is optional if you specified only one Callback URL.
+    If you have more than one Callback URL parameter `redirect_uri` is
+    mandatory. Please avoid special chars like `&` (multiple), `#` in
+    redirect_uri.
+
+
+    URL will be used in step 4. `redirect_uri` should base on defined earlier
+    Callback URL.
+
+
+    Example:
+
+
+    Callback URL: http://myadomain.com/auth/connect
+
+
+    Auth URL:
+    https://www.olx.ua/oauth/authorize/?client_id=123&response_type=code&state=x93ld3v&scope=read+write+v2&redirect_uri=http://myadomain.com/auth/connect
+
+
+    Example 2:
+
+
+    Callback URL: http://myadomain.com/auth/connect
+
+
+    Auth URL:
+    https://www.olx.ua/oauth/authorize/?client_id=123&response_type=code&state=x93ld3v&scope=read+write+v2
+
+
+    If you have only one Callback URL you don’t have to pass `redirect_uri`
+    parameter.
+
+
+    User is redirected to OLX login screen
+
+    User logs in and authorize client
+
+    User is redirected back to `redirect_uri` with some additional query
+    parameters: `code` and `state` (optional).
+
+
+    Example: http://myadomain.com/auth/connect?code=d34feg43g456g&state=x93ld3v
+
+
+    Application exchange received `code` to access token by grant type
+    `authorization_code`.
+
+
+    Request to get access token, sent to `/api/open/oauth/token` endpoint,
+    should have:
+
+    ```
+
+    {
+      "grant_type": "authorization_code",
+      "client_id": "",
+      "client_secret": "",
+      "code": "",
+      "scope": "v2 read write",
+      "redirect_uri": "http://myadomain.com/auth/connect"
+    }
+
+    ```
+
+    Note: `redirect_uri` parameter is optional unless you use parameter
+    `redirect_uri` in Auth URL in step 1. If you use `redirect_uri` in step 1,
+    then `redirect_uri` is also mandatory in request in step 5.
+
+
+    ## Grant type: refresh_token - when access token is expired
+
+
+    When access token expires use saved refresh token to acquire new access
+    token.
+
+
+    Refresh token is special token used to obtain new access token without need
+    to authorization with user credentials again.
+
+
+    Notice: refresh token is valid only for one month (2592000 seconds).
+
+
+    Request to refresh access token, sent to `/api/open/oauth/token` endpoint,
+    should have:
+
+    ```
+
+    {
+      "grant_type": "refresh_token",
+      "client_id": "",
+      "client_secret": "",
+      "refresh_token": ""
+    }
+
+    ```
+
+
+    New access token will be issued.
+
+
+    Refresh Token Response:
+
+    * A new refresh token will be issued. We issue a new refresh token each day,
+    so if the token was issued that day, the most recent token will be returned.
+
+    * Since the refresh token's validity is one month, you should store the new
+    refresh token and use it in your subsequent requests.
+
+    * If the refresh token is not used for a month, it will be invalidated and
+    you will need to re-authenticate the user.
+
+
+    Please store access token and refresh token and keep it in safe place.
+
+
+    ## Grant type: client_credentials - authenticate as Client application
+
+
+    Required fields:
+
+    ```
+
+    {
+      "grant_type": "client_credentials",
+      "client_id": "",
+      "client_secret": "",
+      "scope": "v2 read write"
+    }
+
+    ```
+
+    Now you’re logged in with Client application context. You can obtain list of
+    categories, cities, etc. (but not add advert!). To perform actions on user
+    account you must use other grant type and log in with User context.
+
+
+    ## Access token usage
+
+
+    From now on all request to any API endpoints should be performed with
+    authorization header: Authorization: Bearer ACCESS_TOKEN.
+
+
+    Example:
+
+    ```
+
+    curl -X POST -H “Content-Type: application/json” -d ‘{ data }’ -H
+    “Authorization: Bearer 011c945f30ce2cbafc452f39840f025693339c42” -H
+    “Version: 2.0” “https://www.olx.ua/api/partner/adverts”
+
+    ```
+
+    ## Application with multiple OLX users
+
+
+    **Overview**
+
+
+    Lets say you have your application that has its own users and each user
+    needs to manage his olx account (post adverts, reply to messages etc.). Flow
+    is actually no different than for single user.
+
+    * Your app has client_id and client_secret
+
+    * Your app user needs to connect his account to OLX and in return he will
+    get code
+
+    * Code is used one time only to get access_token and refresh token
+
+    * Your app user is authenticated with access_token until it gets expired
+
+    * Your app user gets new access_token by using refresh token
+
+
+    As you see this is exactly the same as you would have single user. As soon
+    as user is authenticated, OLX API works in context of that user.
+
+
+    **Obtaining client_id and client_secret**
+
+
+    As you already know, you get it by filling online form. If your request is
+    accepted you will get them by email.
+
+
+    **Connecting app user account to OLX**
+
+
+    Usually on your app there will be a button “connect olx account” or it can
+    be done on authentication itself “login with olx” or something similar. This
+    action is connected with uri:
+
+    ```
+
+    /oauth/authorize/?client_id=XXX&response_type=code&state=XXX&redirect_uri=XXX&scope=read
+    write v2
+
+    ```
+
+
+    `client_id` - your app client id that you got by email
+
+
+    `response_type` - is set to “code”, that is oauth 2.0 standard
+
+
+    `state` - is your random hash that you need to save for the time of request,
+    when you get response with state you need to check if it is the same as your
+    saved one just to be sure that it is correct response (and there is no one
+    in the middle trying to give you false secret data)
+
+
+    `redirect_uri` - is the uri where response with code will be sent
+
+
+    `scope` - is the scope you ask for, typically it is “read write v2”
+
+
+    Whenever user triggers that uri, he/she is redirected to OLX login page (or
+    account if is already logged in) and after authentication and accepting
+    application connection is redirected back to redirect_uri with code and
+    state.
+
+
+    `code` - is one time authorization token
+
+
+    `scope` - is the scope that you sent on request Example:
+    http://myadomain.com/auth?code=d34feg43g456g&state=x93ld3v
+
+
+    **Getting access_token and refresh_token for user**
+
+
+    Now, finally you can get user api credentials that will be used for API
+    authentication. Your app needs to make POST request for that:
+
+    ```
+
+    POST /api/open/oauth/token
+
+
+    {
+      "grant_type": "authorization_code",
+      "client_id": "<your client_id>",
+      "client_secret": "<your client_secret>",
+      "code": "<code from previous action>",
+      "scope": "v2 read write"
+    }
+
+    ```
+
+    In response you will get user data:
+
+    ```
+
+    {
+      "access_token": "454c3cd39a980500e9b787e03d53ec5c320f644b",
+      "expires_in": 86400,
+      "token_type": "bearer",
+      "scope": "v2 read write",
+      "refresh_token": "12a13560163da7901d7f74c89fc5df3ea7625942"
+    }
+
+    ```
+
+    `acccess_token` - is a token that user will user to authenticate with API
+
+
+    `expires_in` - indicates when access_token will expire
+
+
+    `token_type` - is always set to bearer, this means that access_token will be
+    sent in every request header as Bearer <access_token>
+
+
+    `scope` - is your requested scope, typically “v2 read write”
+
+
+    `refresh_token` - is a token that will be needed to refresh expired
+    access_token. Token is valid for one month (2592000 seconds).
+
+
+    From now on you will add to each api request of that user a header
+    “Authorization: Bearer 454c3cd39a980500e9b787e03d53ec5c320f644b”. You need
+    to store securly each user’s access_token and refresh_token. Whenever your
+    app user will authenticate to your app and manage olx account, you will use
+    this data for OLX API requests.
+
+    Refreshing access_token with refresh_token
+
+
+    Every period of time access_token will expire. When it does you need to make
+    call to refresh it (and get new one).
+
+    ```
+
+    POST /api/open/oauth/token
+
+    {
+      "grant_type": "refresh_token",
+      "client_id": "<your client_id>",
+      "client_secret": "<your client_secret>",
+      "refresh_token": "<your user's refresh_token>"
+    }
+
+    ```
+
+    `grant_type` - is set to “refresh_token”, which means user is refreshing
+    access_token with refresh_token
+
+
+    `client_id`, client_secret - are your app secrets
+
+
+    `refresh_token` - is your app user’s refresh_token that you got for him in
+    previous requests.
+
+
+    Response depends on state of access token:
+
+
+    * when access token is expired, in response client will receive new access
+    token.
+
+    * if token was not expired yet, client will receive same token, with
+    information about remaining time left.
+
+
+    Notice: refresh token is valid for one month (2592000 seconds). Also it can
+    be changed when new access token is generated.
+
+
+    You need to update access and refresh token in your database. Please keep
+    them safe.
+
+    More users
+
+
+    Notice that this whole flow has to be completed for each app user. So
+    finally you will have data stored something like that:
+
+
+    |User             |Access Token                            |Refresh
+    Token                           |
+
+    |-----------------|----------------------------------------|----------------------------------------|
+
+    |user1@domain.com
+    |6c29bb64200ba868442b95cf16d14122ecd95816|c9fd39b05bdf01b233915b973e7efcdcb4993f3d|
+
+    |user2@test.com  
+    |011c945f30ce2cbafc452f39840f025693339c42|1c6637a8f2e1f75e06ff9984894d6bd16a3a36a9|
+
+
+    (…)
+
+
+    Now, when your application wants to perform any action in context of these
+    any user, it has to use corresponding data (access_token, refresh_token).
+
+
+    Lets say, your app user user2@test.com wants to add new advert, then your
+    requests should look like this:
+
+    ```
+
+    curl -X POST -H "Content-Type: application/json" -d '{ data }' -H
+    "Authorization: Bearer 011c945f30ce2cbafc452f39840f025693339c42"
+    "https://www.olx.ua/api/partner/adverts"
+
+    ```
+
+    Notice which token is used.
+
+
+    Another case: application wants to fetch all threads of user1@domain.com:
+
+    ```
+
+    curl -X GET  -H "Authorization: Bearer
+    6c29bb64200ba868442b95cf16d14122ecd95816"
+    "https://www.olx.ua/api/partner/threads"
+
+    ```
+
+    Same rule applies to all endpoints in OLX API.
+
+
+    | Security Scheme Type             |
+    OAuth2                                                                                                                                                                                                                                                                      
+    |
+
+    |----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+
+    | **authorizationCode OAuth Flow** | **Authorization URL:**
+    https://www.olx.ua/oauth/authorize <br> **Token URL:**
+    https://www.olx.ua/api/open/oauth/token <br> **Refresh URL:**
+    https://www.olx.ua/api/open/oauth/token <br> **Scopes:** <br> `v2` - access
+    to api v2 <br> `write` - modify resources <br> `read` - read resources |
+
+    | **clientCredentials OAuth Flow** | **Token URL:**
+    https://www.olx.ua/api/open/oauth/token <br> **Refresh URL:**
+    https://www.olx.ua/api/open/oauth/token <br> **Scopes:** <br> `v2` - access
+    to api v2 <br> `write` - modify resources <br> `read` - read
+    resources                                                          |
+
+
+
+    # Troubleshooting
+
+
+    The aim of this section is to familiarise you with the possible errors that
+    may appear during the development process or directly after launching the
+    integration for the very first time.
+
+
+    ## Error handling
+
+    This API uses standard HTTP status codes to indicate the status of a
+    response.
+
+
+    |Name                  
+    |Code|Description                                                                                                                                                   
+    |
+
+    |-----------------------|----|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+
+    |Bad request            |400 |The request was unacceptable. For example
+    validation didn’t
+    pass.                                                                                             
+    |
+
+    |Unauthorized           |401 |The request has not been applied because it
+    lacks valid authentication credentials for the target
+    resource.                                                    |
+
+    |Forbidden              |403 |The server understood the request, but is
+    refusing to fulfill
+    it                                                                                              
+    |
+
+    |Not Found              |404 |The server has not found anything matching the
+    request
+    URI                                                                                                    
+    |
+
+    |Not acceptable         |406 |The server is unable to return a response in
+    the format that was requested by the
+    client                                                                      
+    |
+
+    |Unsupported Media Type |415 |The server is refusing to service the request
+    because the entity of the request is in a format not supported by the
+    requested resource for the requested method|
+
+    |Too many requests      |429 |Too many requests hit the API too
+    quickly                                                                                                                     
+    |
+
+    |Server error           |500 |An error that is not caused by client,
+    something bad happend on
+    server                                                                                        
+    |
+
+
+    **Example**
+
+    ```
+
+    {
+      "error": {
+        "status": 400,
+        "title": "Invalid request",
+        "detail": "Data validation error occurred",
+        "validation": [
+        {
+          "field": "title",
+          "title": "Musisz podać tytuł",
+          "detail": "Musisz podać tytuł"
+        },
+        {
+          "field": "description",
+          "title": "Musisz podać opis",
+          "detail": "Musisz podać opis"
+        }
+        ]
+      }
+    }
+
+    ```
+
+
+    ## Authorization errors
+
+
+    These errors are related to the authorization process. Below you can find
+    the most common situations and proposed solutions.
+
+
+    ### 1. Missing parameter: `code` is required
+
+
+    **HTTP code: `400 Bad Request`**
+
+
+    ```
+
+    {
+      "error": "invalid_request",
+      "error_description": "Missing parameter: \"code\" is required",
+    }
+
+    ```
+
+    **Solution**:
+
+    * provide missing `code` parameter in the request
+
+
+    **Example:**
+
+    ```
+
+    {
+      "grant_type":"authorization_code"
+      "scope":"read write v2"
+      "client_id":"<your client_id>"
+      "client_secret":"<your client_secret>"
+      "code":"<one time authorization token>"
+    }
+
+    ```
+
+    ### 2. Authorization code doesn't exist or is invalid for the client
+
+
+    **HTTP code: `400 Bad Request`**
+
+
+    ```
+
+    {
+      "error": "invalid_grant",
+      "error_description": "Authorization code doesn't exist or is invalid for the client",
+    }
+
+    ```
+
+    **Solution**:
+
+    * provide valid `code` parameter in the request (please remember that it is
+    valid for 10 minutes only)
+
+
+    ### 3. The grant type was not specified in the request
+
+
+    **HTTP code: `400 Bad Request`**
+
+
+    ```
+
+    {
+      "error": "invalid_request",
+      "error_description": "The grant type was not specified in the request",
+    }
+
+    ```
+
+    **Solution**:
+
+    * provide required `grant_type` parameter in the request
+
+
+    ### 4. The scope requested is invalid for this client
+
+
+    **HTTP code: `400 Bad Request`**
+
+
+    ```
+
+    {
+      "error": "invalid_scope",
+      "error_description": "The scope requested is invalid for this client",
+    }
+
+    ```
+
+    **Solution**:
+
+    * verify provided `scope`
+
+    * make sure that your API account is allowed to use a given `scope`
+
+
+    ### 5. Client is not active
+
+
+    **HTTP code: `401 Unauthorized`**
+
+
+    ```
+
+    {
+      "error": "invalid_client",
+      "error_description": "Client is not active",
+    }
+
+    ```
+
+    **Solution**:
+
+    * verify `client_id` provided in the request
+
+
+    ### 6. The client credentials are invalid
+
+
+    **HTTP code: `400 Bad Request`**
+
+
+    ```
+
+    {
+      "error": "invalid_client",
+      "error_description": "The client credentials are invalid",
+    }
+
+    ```
+
+    **Solution**:
+
+    * verify `client_id` and `client_secret` provided in the request
+
+
+    ### 7. The access token provided is invalid
+
+
+    **HTTP code: `401 Unauthorized`**
+
+
+    ```
+
+    {
+      "error": "invalid_token",
+      "error_description": "The access token provided is invalid",
+    }
+
+    ```
+
+    **Solution**:
+
+    * verify `access_token` provided in the request
+
+
+    ### 8. Insufficient scope
+
+
+    **HTTP code: `401 Unauthorized`**
+
+
+    ```
+
+    {
+        "error": "insufficient_scope",
+        "error_description": "The request requires higher privileges than provided by the access token",
+        "error_human_title": "Insufficient scope."
+    }
+
+    ```
+
+    **Solution**:
+
+    * you need to authorize yourself with a higher privileges
+
+    * make sure that you are authorized with a proper scopes: `read write v2`
+    instead of `read write`
+
+
+    ### 9. Invalid owner in token
+
+
+    ```
+
+    {
+      "error": {
+        "status": 400,
+        "title": "Bad Request",
+        "detail": "Invalid owner in token"
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that you are authenticated in the user context -
+    `"grant_type":"authorization_code"` instead of
+    `"grant_type":"client_credentials"`
+
+
+    ### 10. The grant type is unauthorized for this client_id
+
+
+    ```
+
+    {
+        "error": "unauthorized_client",
+        "error_description": "The grant type is unauthorized for this client_id",
+        "error_human_title": "Unauthorized client."
+    }
+
+    ```
+
+    **Solution**:
+
+    * your API account is not allowed to use a given `grant_type`
+
+    * reach out to us in order to check it out
+
+
+    ### 11. Invalid refresh token
+
+
+    ```
+
+    {
+        "error": "invalid_grant",
+        "error_description": "Invalid refresh token",
+        "error_human_title": "Provided authorization credentials are invalid or expired."
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that `refresh_token` is valid (please remember that it lasts for
+    2592000 seconds and can be changed when new access token is generated)
+
+    * authenticate yourself once again in order to receive a new one
+
+
+    ## Publishing errors
+
+
+    These errors happen when something goes wrong during the advert publishing.
+
+
+    ### 1. Category with given ID doesn't exists
+
+
+    ```
+
+    {
+      "error": {
+        "status": 400,
+        "title": "Bad Request",
+        "detail": "Category with given ID doesn't exists"
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * provide valid `category_id` in the request
+
+
+    ### 2. Fix the category
+
+
+    ```
+
+    {
+      "error": {
+        "status": 400,
+        "title": "Invalid request",
+        "detail": "Data validation error occurred",
+        "validation": [
+          {
+            "field": "category_id",
+            "title": "Fix the category",
+            "detail": "Fix the category"
+          }
+        ]
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * provide valid `category_id` in the request
+
+    * make sure that the `category_id` is a leaf category:
+
+
+    ```
+
+    GET /api/partner/categories/1755
+
+
+    {
+      "data": {
+          "id": 1755,
+          "name": "Praca inżynieryjna, techniczna",
+          "parent_id": 1447,
+          "photos_limit": 0,
+          "is_leaf": true
+      }
+    }
+
+    ```
+
+    ### 3. Error while decoding JSON data: Syntax error
+
+
+    ```
+
+    {
+      "data": {
+        "error": {
+          "status": 400,
+          "title": "Bad Request",
+          "detail": "Error while decoding JSON data: Syntax error"
+        }
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that the payload you are sending does not contain any extra
+    fields
+
+    * make sure that the field names are valid and do not contain any typos
+
+
+    ### 4. Partner is not allowed to use external URL
+
+
+    ```
+
+    {
+      "error": {
+        "status": 400,
+        "title": "Bad Request",
+        "detail": "Partner is not allowed to use external URL"
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * your API account is not allowed to use `external_url` field
+
+    * this feature is available only for a Jobs category in PL
+
+    * reach out to us in order to enable this option
+
+
+    ### 5. Invalid value: `district_id`
+
+
+    ```
+
+    {
+      "error": {
+        "status": 400,
+        "title": "Invalid request",
+        "detail": "Data validation error occurred",
+        "validation": [
+          {
+            "field": "district_id",
+            "title": "Invalid value"
+          }
+        ]
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * verify `district_id` provided in the request:
+
+
+    ```
+
+    GET /api/partner/cities/{cityId}/districts
+
+    ```
+
+
+    ### 6. Your coordinates are too far from picked location
+
+
+    ```
+
+    {
+      "error": {
+        "status": 400,
+        "title": "Invalid request",
+        "detail": "Data validation error occurred",
+        "validation": [
+          {
+            "field": "district/city_id",
+            "title": "Your coordinates are too far from picked location."
+          }
+        ]
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * verify if `latitude` and `longitude` fields are valid for a given
+    district/city_id:
+
+
+    ```
+
+    GET /api/partner/locations/?latitude={lat}&longitude={lon}
+
+    ```
+
+
+    ### 7. This value is not valid: `attributes`
+
+
+    ```
+
+    {
+      "error": {
+        "status": 400,
+        "code": 400,
+        "title": "Invalid request",
+        "detail": "Data validation error occurred",
+        "validation": [
+          {
+            "field": "attributes",
+            "title": "This value is not valid."
+          }
+        ]
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that the `attributes` array contains `code` and `value` keys
+    only:
+
+
+    ```
+
+    "attributes": [
+      {
+        "code": "type",
+        "value": "fulltime"
+      },
+      {
+        "code": "contract",
+        "value": "contract"
+      },
+      {
+        "code": "manager",
+        "value": "0"
+      },
+      {
+        "code": "remote_recruitment",
+        "value": "0"
+      }
+    ]
+
+    ```
+
+    ### 8. Invalid value: `params.state`
+
+
+    ```
+
+    {
+      "error": {
+        "status": 400,
+        "title": "Invalid request",
+        "detail": "Data validation error occurred",
+        "validation": [
+          {
+            "field": "params.state",
+            "title": "Invalid value"
+          }
+        ]
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * verify `state` value in the `attributes` array
+
+
+    ### 9. Image error: Remote file not exists
+
+
+    ```
+
+    {
+      "error": {
+        "status": 400,
+        "title": "Bad Request",
+        "detail": "Image error: Remote file not exists"
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * verify all URLs provided in the `images` array
+
+
+    ### 10. Image error: Image limit exceeded
+
+
+    ```
+
+    {
+      "error": {
+        "status": 400,
+        "title": "Bad Request",
+        "detail": "Image error: Image limit exceeded"
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that the request does not contain more images than it is
+    allowed:
+
+
+    ```
+
+    GET /api/partner/categories/1581
+
+
+    {
+      "data": {
+          "id": 1581,
+          "name": "Bluzki i koszulki",
+          "parent_id": 642,
+          "photos_limit": 8,
+          "is_leaf": true
+      }
+    }
+
+    ```
+
+
+    ### 11. Unsupported API version
+
+
+    **HTTP code: `404 Not Found`**
+
+
+    ```
+
+    {
+      "error": {
+        "type": "NotFoundException",
+        "message": "Unsupported API version"
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that the URL you are trying to call to is valid
+
+
+    ### 12. Advert not found
+
+
+    ```
+
+    {
+      "error": {
+        "status": 404,
+        "title": "Not Found",
+        "detail": "Advert not found"
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that the advert ID is valid
+
+
+    ### 13. You are not the owner of this ad
+
+
+    ```
+
+    {
+      "error": {
+        "status": 400,
+        "title": "Invalid request",
+        "detail": "Data validation error occurred",
+        "validation": [
+          {
+            "field": "ad",
+            "title": "You are not the owner of this ad"
+          }
+        ]
+      }
+    }
+
+    ```
+
+    **Solution**:
+
+    * you are not allowed to manage the ads created by other users
+
+
+    ### 14. Too many capital letters
+
+
+    ```
+
+    {
+        "error": {
+            "status": 400,
+            "title": "Invalid request",
+            "detail": "Data validation error occurred",
+            "validation": [
+                {
+                    "field": "title",
+                    "title": "Too many capital letters"
+                }
+            ]
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that the title or description does not contain more than 50%
+    text written in capital letters
+
+
+    ### 15. Field is not valid. Emails and www addresses are not allowed
+
+
+    ```
+
+    {
+        "error": {
+            "status": 400,
+            "title": "Invalid request",
+            "detail": "Data validation error occurred",
+            "validation": [
+                {
+                    "field": "title",
+                    "title": "Field is not valid. Emails and www addresses are not allowed"
+                }
+            ]
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that the title or description does not contain any e-mail/www
+    address
+
+
+    ### 16. Field is not valid. Phone numbers are not allowed
+
+
+    ```
+
+    {
+        "error": {
+            "status": 400,
+            "title": "Invalid request",
+            "detail": "Data validation error occurred",
+            "validation": [
+                {
+                    "field": "title",
+                    "title": "Field is not valid. Phone numbers are not allowed"
+                }
+            ]
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that the title or description does not contain any phone number
+
+
+    ### 17. Field contains to much punctuation
+
+
+    ```
+
+    {
+        "error": {
+            "status": 400,
+            "title": "Invalid request",
+            "detail": "Data validation error occurred",
+            "validation": [
+                {
+                    "field": "title",
+                    "title": "Field contains to much punctuation"
+                }
+            ]
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * following characters cannot be provided in the title and in the
+    description three times in a row: `!` `?` `.` `,` `-` `=` `+` `#` `%` `&`
+    `@` `*` `_` `>` `<` `:` `(` `)` `|`
+
+
+    ### 18. Deactivate advert - ad has to be active
+
+
+    ```
+
+    {
+        "error": {
+            "status": 400,
+            "title": "Invalid request",
+            "detail": "Data validation error occurred",
+            "validation": [
+                {
+                    "field": "ad",
+                    "title": "Ad has to be active"
+                }
+            ]
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that the advert you want to deactivate is active
+
+
+    ### 19. Delete advert - invalid status
+
+
+    ```
+
+    {
+        "error": {
+            "status": 400,
+            "title": "Invalid request",
+            "detail": "Data validation error occurred",
+            "validation": [
+                {
+                    "field": "ad",
+                    "title": "Invalid status"
+                }
+            ]
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that the advert you want to delete is not active
+
+    * deactivate the advert before deletion:
+
+
+    ```
+
+    POST /api/partner/adverts/{advertId}/commands
+
+
+    {
+      "command": "deactivate",
+      "is_success": true // this flag indicates whether you have succeeded in selling the product or not
+    }
+
+    ```
+
+    ### 20. Cannot refresh advert
+
+
+    ```
+
+    {
+        "error": {
+            "status": 400,
+            "title": "Invalid request",
+            "detail": "Data validation error occurred",
+            "validation": [
+                {
+                    "field": "time",
+                    "title": "You cannot refresh ad more often than once in 14 days"
+                }
+            ]
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * depending on the country you cannot refresh advert more than once in a
+    given period of time
+
+    * please wait until the refresh option will be available for the advert
+
+
+    ### 21. City with given ID doesn't exists
+
+
+    ```
+
+    {
+        "error": {
+            "status": 400,
+            "title": "Bad Request",
+            "detail": "City with given ID doesn't exists"
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * verify `city_id` provided in the request:
+
+
+    ```
+
+    GET /api/partner/cities/{cityId}
+
+
+    {
+        "error": {
+            "status": 404,
+            "title": "Not Found",
+            "detail": "City not found"
+        }
+    }
+
+    ```
+
+
+    ### 22. Invalid phone format
+
+
+    ```
+
+    {
+        "error": {
+            "status": 400,
+            "title": "Invalid request",
+            "detail": "Data validation error occurred",
+            "validation": [
+                {
+                    "field": "phone",
+                    "title": "Invalid phone format"
+                }
+            ]
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that the `phone` provided in the request is valid
+
+
+    ### 23. Missing required 'Version' header
+
+
+    ```
+
+    {
+        "data": {
+            "error": {
+                "status": 400,
+                "title": "Bad Request",
+                "detail": "Missing required 'Version' header!"
+            }
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * add `"Version": "2.0"` header to your request
+
+
+    ## Payment errors
+
+
+    Errors described in this section are related to the payment process
+
+
+    ### 1. No possibility to buy the packet
+
+
+    ```
+
+    {
+        "error": {
+            "status": 400,
+            "title": "Bad Request",
+            "detail": "There is no variant with size 123 for category 123"
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * verify if the packet you are interested in is available for a given
+    category:
+
+
+    ```
+
+    GET /api/partner/packets?category_id={categoryId}
+
+    ```
+
+
+    ### 2. Invalid payment method
+
+
+    ```
+
+    {
+        "error": {
+            "status": 400,
+            "title": "Bad Request",
+            "detail": "Invalid payment method"
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that the `payment_method` provided in the request is valid:
+
+
+    ```
+
+    GET /api/partner/users/me/payment-methods
+
+    ```
+
+
+    ### 3. Payment method `postpaid` is not activated
+
+
+    ```
+
+    {
+        "error": {
+            "status": 400,
+            "title": "Bad Request",
+            "detail": "Payment method 'postpaid' is not activated"
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * `postpaid` method is not activated for the OLX account
+
+    * reach out to the local OLX support team to activate this option
+
+
+    ### 4. Not enough credits
+
+
+    ```
+
+    {
+        "error": {
+            "status": 400,
+            "title": "Bad Request",
+            "detail": "Not enough credits"
+        }
+    }
+
+    ```
+
+    **Solution**:
+
+    * make sure that there is enough credits on your OLX account to pay for a
+    given feature:
+
+
+    ```
+
+    GET /api/partner/users/me/account-balance
+
+    ```
+  version: '2.0'
+  title: OLX Partner API
+servers:
+  - url: https://www.olx.ua/api/partner
+    description: OLX Production Server
+paths:
+  /users/me:
+    get:
+      tags:
+        - Users
+      summary: Get authenticated user
+      description: Get currently Authenticated User
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: &ref_16
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  email:
+                    type: string
+                  status:
+                    type: string
+                  name:
+                    type: string
+                  phone:
+                    type: string
+                  created_at:
+                    type: string
+                  last_login_at:
+                    type: string
+                  avatar:
+                    type: string
+                  is_business:
+                    type: boolean
+                example:
+                  id: 123
+                  email: john@mail.com
+                  status: confirmed
+                  name: John
+                  phone: 123123123
+                  phone_login: 123123123
+                  created_at: '2018-01-29 14:04:13'
+                  last_login_at: '2018-01-30 08:20:28'
+                  avatar: null
+                  is_business: true
+      security:
+        - access_token:
+            - read
+            - v2
+  /users/{id}:
+    get:
+      tags:
+        - Users
+      summary: Get user
+      description: Get any User
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: &ref_17
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  avatar:
+                    type: string
+                example:
+                  id: 1
+                  name: John
+                  avatar: null
+      security:
+        - access_token:
+            - read
+            - v2
+  /regions:
+    get:
+      tags:
+        - Cities & Districts
+      summary: List of country regions
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_0
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    name:
+                      type: string
+                  example:
+                    id: 1
+                    name: Wielkopolskie
+      security:
+        - access_token:
+            - read
+            - v2
+  /regions/{regionId}:
+    get:
+      tags:
+        - Cities & Districts
+      summary: Get region
+      parameters:
+        - name: regionId
+          in: path
+          required: true
+          description: Region ID
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: *ref_0
+      security:
+        - access_token:
+            - read
+            - v2
+  /cities:
+    get:
+      tags:
+        - Cities & Districts
+      summary: Get cities
+      description: Get list of cities
+      parameters:
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Starting element
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Elements limit per page (default 1000)
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_1
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    region_id:
+                      type: integer
+                      description: Region ID
+                    name:
+                      type: string
+                      description: City name
+                    county:
+                      type: string
+                      description: County name
+                    municipality:
+                      type: string
+                      description: Municipality name
+                    latitude:
+                      type: number
+                      description: City Latitude
+                    longtitude:
+                      type: number
+                      description: City longtitude
+                  example:
+                    id: 627
+                    region_id: 123
+                    name: Aleksandrów Kujawski
+                    county: aleksandrowski
+                    municipality: Aleksandrów Kujawski
+                    latitude: 52.86653
+                    longitude: 18.69801
+      security:
+        - access_token:
+            - read
+            - v2
+  /cities/{cityId}:
+    get:
+      tags:
+        - Cities & Districts
+      summary: Get city
+      parameters:
+        - name: cityId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: *ref_1
+      security:
+        - access_token:
+            - v2
+            - read
+  /cities/{cityId}/districts:
+    get:
+      tags:
+        - Cities & Districts
+      summary: Get city districts
+      parameters:
+        - name: cityId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_2
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    city_id:
+                      type: integer
+                    name:
+                      type: string
+                    latitude:
+                      type: number
+                      description: Latitude of center of district
+                    longtitude:
+                      type: number
+                      description: Longtitude of center of district
+                  example:
+                    id: 97
+                    city_id: 5659
+                    name: Aniołki
+                    latitude: 54.36306
+                    longitude: 18.63193
+      security:
+        - access_token:
+            - v2
+            - read
+  /districts:
+    get:
+      tags:
+        - Cities & Districts
+      summary: Get districts
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: *ref_2
+  /districts/{districtId}:
+    get:
+      tags:
+        - Cities & Districts
+      summary: Get district
+      parameters:
+        - name: districtId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: *ref_2
+      security:
+        - access_token:
+            - v2
+            - read
+  /locations:
+    get:
+      tags:
+        - Cities & Districts
+      summary: Get locations
+      parameters:
+        - name: latitude
+          in: query
+          required: true
+          schema:
+            type: number
+          description: Location latitude
+        - name: longitude
+          in: query
+          required: true
+          schema:
+            type: number
+          description: Location longitude
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  properties:
+                    city: *ref_1
+                    district: *ref_2
+      security:
+        - access_token:
+            - v2
+            - read
+  /languages:
+    get:
+      tags:
+        - Languages & currencies
+      summary: Get languages
+      description: Get site available languages
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_18
+                  type: object
+                  properties:
+                    code:
+                      type: string
+                    is_default:
+                      type: boolean
+                  example:
+                    code: pl
+                    is_default: true
+      security:
+        - access_token:
+            - v2
+            - read
+  /currencies:
+    get:
+      tags:
+        - Languages & currencies
+      summary: Get currencies
+      description: Get site available currencies
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_19
+                  type: object
+                  properties:
+                    code:
+                      type: string
+                    label:
+                      type: string
+                    is_default:
+                      type: boolean
+                  example:
+                    code: PLN
+                    label: zł
+                    is_default: true
+      security:
+        - access_token:
+            - v2
+            - read
+  /categories:
+    get:
+      tags:
+        - Categories & attributes
+      summary: Get categories
+      parameters:
+        - name: parent_id
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Parent category ID
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_3
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      description: Category ID
+                      example: 1291
+                    name:
+                      type: string
+                      description: Category name
+                      example: Akcesoria kuchenne
+                    parent_id:
+                      type: integer
+                      description: Parent category ID
+                      example: 1409
+                    photos_limit:
+                      type: integer
+                      description: >-
+                        Information how many photos can be posted for adver in
+                        given category
+                      example: 10
+                    is_leaf:
+                      type: boolean
+                      description: >-
+                        Is this category a leaf in category tree. If true that
+                        means that category has no children
+                  description: A representation of a Category.
+                  example:
+                    id: 1291
+                    name: Akcesoria kuchenne\
+                    parent_id: 1409
+                    photos_limit: 0
+                    is_leaf: true
+      security:
+        - access_token:
+            - v2
+            - read
+  /categories/{categoryId}:
+    get:
+      tags:
+        - Categories & attributes
+      summary: Get category
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Identifier of the Category
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: *ref_3
+      security:
+        - access_token:
+            - v2
+            - read
+  /categories/{categoryId}/attributes:
+    get:
+      tags:
+        - Categories & attributes
+      summary: Get category attributes
+      description: Gets attribute definitions for given category
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Category ID
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_21
+                  type: object
+                  required:
+                    - code
+                    - label
+                  properties:
+                    code:
+                      type: string
+                      description: Attribute code
+                    label:
+                      type: string
+                    unit:
+                      type: string
+                      description: Attribute unit
+                      example: kg
+                    validation:
+                      type: object
+                      description: Attribute validation rules
+                      properties:
+                        type:
+                          type: string
+                          enum:
+                            - salary
+                            - price
+                            - attribute
+                        required:
+                          type: boolean
+                          description: Is attribute required
+                        numeric:
+                          type: boolean
+                          description: Is attribute should be numeric
+                        min:
+                          type: integer
+                          description: Minimum value for attribute
+                        max:
+                          type: string
+                          description: Maxiumum value for attribute
+                        allow_multiple_values:
+                          type: boolean
+                          description: Can attribute take more than one value
+                    values:
+                      type: array
+                      description: List of available values for an attribute
+                      items:
+                        type: object
+                        properties:
+                          code:
+                            type: string
+                            description: Value code
+                          label:
+                            type: string
+                            description: Value label
+                  example:
+                    code: price
+                    label: Cena
+                    unit: null
+                    validation:
+                      type: price
+                      required: true
+                      numeric: true
+                      min: null
+                      max: null
+                      allow_multiple_values: false
+                    values: []
+      security:
+        - access_token:
+            - v2
+            - read
+  /categories/suggestion:
+    get:
+      tags:
+        - Categories & attributes
+      summary: Get category suggestions
+      description: Gets category suggestions for a given Ad title
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 3
+          description: Ad title
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_20
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      description: Category ID
+                      example: 451
+                    name:
+                      type: string
+                      description: Category name
+                      example: Pozostała elektronika
+                    path:
+                      type: array
+                      description: Parent categories in ascending order
+                      items:
+                        properties:
+                          id:
+                            type: integer
+                            description: Category ID
+                            example: 99
+                          name:
+                            type: string
+                            description: Category name
+                            example: Elektronika
+      security:
+        - access_token:
+            - v2
+            - read
+  /threads:
+    get:
+      tags:
+        - Threads & messages
+      summary: Get threads
+      description: Get threads
+      parameters:
+        - name: advert_id
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Advert ID
+        - name: interlocutor_id
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: User ID
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Starting element
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Limit
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_4
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      description: Thread ID
+                    advert_id:
+                      type: integer
+                      description: Advert ID
+                    interlocutor_id:
+                      type: integer
+                      description: User ID whom is conversation with
+                    total_count:
+                      type: integer
+                      description: Total count of messages in thread
+                    unread_count:
+                      type: integer
+                      description: Count of unread messages in thread
+                    created_at:
+                      type: string
+                      format: date-time
+                      description: Time when thread was created
+                    is_favourite:
+                      type: boolean
+                      description: Is this thread marked as favourite
+                  description: >-
+                    Thread object groups all messages for given interlocutor and
+                    advert
+                  example:
+                    id: 1
+                    advert_id: 1
+                    interlocutor_id: 1
+                    total_count: 1
+                    unread_count: 0
+                    created_at: '2018-01-30 08:26:36'
+                    is_favourite: false
+      security:
+        - access_token:
+            - v2
+            - read
+  /threads/{threadId}:
+    get:
+      tags:
+        - Threads & messages
+      summary: Get thread
+      description: Get thread
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: *ref_4
+      security:
+        - access_token:
+            - v2
+            - read
+    parameters:
+      - name: threadId
+        in: path
+        required: true
+        schema:
+          type: integer
+  /threads/{threadId}/messages:
+    get:
+      tags:
+        - Threads & messages
+      summary: Get messages
+      description: Get messages from given thread
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_5
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      description: Message ID
+                    thread_id:
+                      type: integer
+                      description: Thread ID
+                    created_at:
+                      type: string
+                      format: date-time
+                      description: Time when message was sent
+                    type:
+                      type: string
+                      description: Sent or received
+                      enum:
+                        - sent
+                        - received
+                    text:
+                      type: string
+                      description: Message text
+                    is_read:
+                      type: boolean
+                      description: Is message read
+                    attachments:
+                      type: array
+                      description: List of attachments
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          url:
+                            type: string
+                    cvs:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          url:
+                            type: string
+                  example:
+                    id: 1
+                    thread_id: 1
+                    created_at: '2018-01-30 08:26:36'
+                    type: sent
+                    text: This is my message
+                    attachments: null
+                    is_read: true
+    post:
+      tags:
+        - Threads & messages
+      summary: Post Message
+      description: >-
+        Posts new message in a given thread. Field 'phone' is optional and
+        depends on the category - used in Jobs categories right now.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - text
+              properties:
+                text:
+                  type: string
+                  description: Text of the message
+                attachments:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      url:
+                        type: string
+      responses:
+        '200':
+          description: Status 200
+      security:
+        - access_token:
+            - v2
+            - write
+    parameters:
+      - name: threadId
+        in: path
+        required: true
+        schema:
+          type: integer
+  /threads/{threadId}/messages/{messageId}:
+    get:
+      tags:
+        - Threads & messages
+      summary: Get message
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: *ref_5
+      security:
+        - access_token:
+            - v2
+            - read
+    parameters:
+      - name: threadId
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: integer
+  /threads/{threadId}/commands:
+    post:
+      tags:
+        - Threads & messages
+      summary: Take action on thread
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - command
+              properties:
+                command:
+                  type: string
+                  description: >-
+                    Commands `mark-as-read` - to mark thread as read,
+                    `set-favourite` - to set thread as favourite or not
+                  enum:
+                    - mark-as-read
+                    - set-favourite
+                is_favourite:
+                  type: boolean
+                  description: >-
+                    Set is thread favourite or not. Required for `set-favourite`
+                    command
+      responses:
+        '204':
+          description: Status 204
+      security:
+        - access_token:
+            - v2
+            - write
+    parameters:
+      - name: threadId
+        in: path
+        required: true
+        schema:
+          type: integer
+  /paid-features:
+    get:
+      tags:
+        - Paid features
+      summary: Get available paid features
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    code:
+                      type: string
+                    type:
+                      type: string
+                    duration:
+                      type: number
+                    name:
+                      type: string
+                  example:
+                    code: promoted_ad_7
+                    type: topads
+                    duration: 7
+                    name: Wyróżnienie ogłoszenia na 7 dni
+      security:
+        - access_token:
+            - v2
+            - read
+  /adverts/{advertId}/paid-features:
+    get:
+      tags:
+        - Paid features
+      summary: Get active paid features
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_22
+                  type: object
+                  required:
+                    - code
+                    - type
+                  properties:
+                    code:
+                      type: string
+                    type:
+                      type: string
+                    duration:
+                      type: number
+                    name:
+                      type: string
+                    valid_to:
+                      type: string
+                      description: READ ONLY
+                  example:
+                    code: promoted_ad_7
+                    type: topads
+                    duration: 7
+                    name: Wyróżnienie ogłoszenia na 7 dni
+                    valid_to: '2018-02-05 12:12:12'
+      security:
+        - access_token:
+            - v2
+            - read
+    post:
+      tags:
+        - Paid features
+      summary: Purchase paid feature
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - code
+                - payment_method
+              properties:
+                payment_method:
+                  type: string
+                  enum:
+                    - account
+                    - postpaid
+                code:
+                  type: string
+      responses:
+        '204':
+          description: Status 204
+      security:
+        - OAuth2:
+            - v2
+            - write
+    parameters:
+      - name: advertId
+        in: path
+        required: true
+        schema:
+          type: integer
+        description: Advert ID
+  /adverts:
+    get:
+      tags:
+        - Adverts
+      summary: Get user adverts
+      parameters:
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Offset
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Limit
+        - name: external_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: External ID
+        - name: category_ids
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma separated list of categories IDs
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: &ref_10
+                      type: object
+                      required:
+                        - activated_at
+                        - contact
+                        - created_at
+                        - description
+                        - id
+                        - status
+                        - title
+                        - url
+                        - valid_to
+                      properties:
+                        id:
+                          type: integer
+                        status:
+                          type: string
+                          enum:
+                            - new
+                            - active
+                            - limited
+                            - removed_by_user
+                        url:
+                          type: string
+                          description: Advert URL in OLX
+                        created_at:
+                          type: string
+                          description: Date of creation
+                        activated_at:
+                          type: string
+                          description: Date of last activation
+                        valid_to:
+                          type: string
+                        title:
+                          type: string
+                        description:
+                          type: string
+                        category_id:
+                          type: number
+                        advertiser_type:
+                          type: string
+                          enum:
+                            - private
+                            - business
+                        external_id:
+                          type: string
+                          description: Advert’s ID in origin system
+                        external_url:
+                          type: string
+                          description: Advert’s URL in origin system
+                        contact:
+                          required:
+                            - name
+                            - phone
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            phone:
+                              type: string
+                        location:
+                          required:
+                            - city_id
+                          type: object
+                          properties:
+                            city_id:
+                              type: integer
+                            district_id:
+                              type: integer
+                            latitude:
+                              type: number
+                            longitude:
+                              type: number
+                        images:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              url:
+                                type: string
+                        price:
+                          type: object
+                          description: >-
+                            Used by most of the categories, i.e. cars, houses,
+                            clothes, etc.
+                          properties:
+                            value:
+                              type: number
+                            currency:
+                              type: string
+                            negotiable:
+                              type: boolean
+                            trade:
+                              type: boolean
+                            budget:
+                              type: boolean
+                        salary:
+                          type: object
+                          description: Used by some of the categories, i.e. jobs.
+                          properties:
+                            value_from:
+                              type: number
+                            value_to:
+                              type: number
+                            currency:
+                              type: string
+                            negotiable:
+                              type: boolean
+                            type:
+                              type: string
+                              enum:
+                                - monthly
+                                - hourly
+                        attributes:
+                          type: array
+                          items:
+                            required:
+                              - code
+                            type: object
+                            properties:
+                              code:
+                                type: string
+                                description: Code of an attribute
+                              value:
+                                type: string
+                                description: Filled if attribute requires single value
+                              values:
+                                type: array
+                                description: >-
+                                  Filled if attribute allows to enter multiple
+                                  values
+                                items:
+                                  type: string
+                        courier:
+                          type: boolean
+                          description: >-
+                            Is delivery possible. If true that means that
+                            delivery is possible. (Available in BG, KZ, PT, RO).
+                        auto_extend_enabled:
+                          type: boolean
+                          description: >-
+                            Should the advert be automatically extended when it
+                            expires.
+                        product_safety_regulation:
+                          description: >-
+                            Product safety regulation details, required in some
+                            categories in EU. (Available in PL and RO countries)
+                          type: object
+                          properties: &ref_8
+                            placed_before_2024:
+                              type: boolean
+                              required: false
+                              description: Was the product placed on the market before 2024
+                            manufacturer:
+                              type: object
+                              required: false
+                              properties: &ref_6
+                                name:
+                                  type: string
+                                  required: false
+                                country:
+                                  type: string
+                                  required: false
+                                address:
+                                  type: string
+                                  required: false
+                                email:
+                                  type: string
+                                  required: false
+                              example: &ref_7
+                                name: Test Manufacturer
+                                country: PL
+                                address: Test Address 123
+                                email: testemail@example.com
+                            contact_person:
+                              type: object
+                              required: false
+                              properties: *ref_6
+                              example: *ref_7
+                            warning_and_safety:
+                              type: string
+                              required: false
+                              description: Safety and warning information
+                          example: &ref_9
+                            placed_before_2024: false
+                            manufacturer:
+                              name: Test Manufacturer
+                              country: PL
+                              address: Test Address 123
+                              email: manufacturer@example.com
+                            contact_person:
+                              name: Contact Person
+                              country: PL
+                              address: Contact Address 456
+                              email: contact@example.com
+                            warning_and_safety: Handle with care. Keep away from children.
+                      example:
+                        id: 123
+                        status: active
+                        url: https://www.olx.ua/oferta/url.html
+                        created_at: '2018-02-02 09:35:16'
+                        activated_at: '2018-02-02 09:32:52'
+                        valid_to: '2018-03-04 09:32:52'
+                        title: This is title
+                        description: This is description
+                        category_id: 123
+                        advertiser_type: private
+                        external_id: 12345
+                        external_url: http://myshop.com/advert/123
+                        contact:
+                          name: John
+                          phone: 2341235435,1245134254,12452145
+                        location:
+                          city_id: 1
+                          district_id: null
+                          latitude: 53.123
+                          longitude: 17.123
+                        images:
+                          - url: https://www.olx.ua/advert-picture-1.jpg
+                          - url: https://www.olx.ua/advert-picture-2.jpg
+                        price:
+                          value: 123
+                          currency: PLN
+                          negotiable: false
+                          trade: false
+                          budget: false
+                        salary: null
+                        attributes:
+                          - code: model
+                            value: cts
+                            values: null
+                          - code: year
+                            value: 2015
+                            values: null
+                        courier: null
+                        auto_extend_enabled: true
+                        product_safety_regulation:
+                          placed_before_2024: false
+                          manufacturer:
+                            name: Test Manufacturer
+                            country: PL
+                            address: Test Address 123
+                            email: manufacturer@example.com
+                          contact_person:
+                            name: Contact Person
+                            country: PL
+                            address: Contact Address 456
+                            email: contact@example.com
+                          warning_and_safety: Handle with care. Keep away from children.
+      security:
+        - access_token:
+            - v2
+            - read
+    post:
+      tags:
+        - Adverts
+      summary: Create advert
+      description: |
+        ## Validation rules
+
+          * Following characters cannot be provided in the title and in the description three times in a row: `!` `?` `.` `,` `-` `=` `+` `#` `%` `&` `@` `*` `_` `>` `<` `:` `(` `)` `|`
+          * The amount of capital letters in the title and in the ad description cannot be greater than 50% of a whole text.
+          * The title has to be at least 16 characters long and cannot be longer than 150 characters.
+          * The description has to be at least 80 characters long and cannot be longer than 9000 characters.
+          * E-mail addresses and phone numbers are not allowed in the title and in the description.
+          * Salary currency has to be written in uppercase (for example: `EUR` instead of `eur`).
+          * Lower or upper value of the salary cannot be greater than 99999999999999.
+
+        ## Advert lifecycle
+
+          * Post new advert
+          * In response you will get current status of posted advert:
+            * if status is `limited` then you must buy packet for advert or category and activate advert (check out Packets section and Adverts section)
+            * if status is `new` then flow goes to point 3.
+          * Advert is awaiting for moderation. Usually it takes some seconds.
+            * if advert is accepted it will be activated automatically and visible for all users
+            * if advert is rejected (possible reasons: scam, illegal items offered etc)
+            * if advert is rejected but user can fix issues, and advert goes back to moderation
+          * Advert is active. How long advert will be valid is defined in field `valid_to` in advert response.
+          * When “valid to” date is passed, advert becomes outdated - user can activate advert again.
+
+          User can manually deactivate advert, status is set to `removed_by_user`. Deactivated advert can be activated again. To completly remove advert user should deactivate it at first and then delete it (check out Adverts section).
+
+          ## Advert statuses
+
+          * new: fresh advert before activation and moderation
+          * active: visible on OLX
+          * limited: advert exceeded limit of free adverts in selected category
+          * removed_by_user: manually removed by user
+          * outdated: advert reached expiration date
+          * unconfirmed: waiting for confirmation
+          * unpaid: waiting for payment
+          * moderated: negative moderation result
+          * blocked: blocked by moderation
+          * disabled: disabled by moderation, offer blocked and waiting for verification
+          * removed_by_moderator: removed by moderator
+
+          ## Posting Advert
+
+          To add an advert client have to send request to `/api/partner/adverts` endpoint.
+
+          This endpoint requires POST HTTP method, and expects data to be sent as JSON along with `Content-Type: application/json header`.
+
+          Remember to send `Authorization: Bearer ACCESS_TOKEN` and `Version: 2.0` headers either.
+
+          Using this endpoint creates advert in the name of currently authenticated user.
+
+          You must send all required fields (as it’s described in `/api/partner/adverts` endpoint reference), inlcuding required attributes.
+
+          For list of available categories, attributes, cities please check out appropriate endpoint references like `/api/partner/categories`, `/api/partner/cities` and so on.
+
+          You can get list of required attributes by `/api/partner/categories/ID/attributes` endpoint where ID is the category ID you choosed. Endpoint return list of required and optional attributes to create advert - attributes vary in different countries and categories.
+
+          Important: please note that attributes with type salary and price have different structures than normal attributes. For more details about those attributes please read Create advert endpoint description.
+
+          When some required fields are missing in response you will get a list of errors as a result:
+          ```
+          {
+            "error": {
+              "status": 400,
+              "title": "Invalid request",
+              "detail": "Data validation error occurred",
+              "validation": [
+                {
+                  "field": "title",
+                  "title": "Musisz podać tytuł",
+                  "detail": "Musisz podać tytuł"
+                },
+                {
+                  "field": "description",
+                  "title": "Musisz podać opis",
+                  "detail": "Musisz podać opis"
+                }
+              ]
+            }
+          }
+          ```
+          API will return full advert model if request succeded:
+          ```
+          {
+            "id": 123,
+            "status": "active",
+            "url": "https://www.olx.ua/oferta/url.html",
+            "created_at": "2018-02-02 09:35:16",
+            "activated_at": "2018-02-02 09:32:52",
+            "valid_to": "2018-03-04 09:32:52",
+            "title": "This is title",
+            "description": "This is description",
+            "category_id": 123,
+            "advertiser_type": "private",
+            "external_id": "12345",
+            "external_url": "http://myshop.com/advert/123",
+            "contact": {
+              "name": "John",
+              "phone": "2341235435,1245134254,12452145"
+            },
+            "location": {
+              "city_id": 1,
+              "district_id": null,
+              "latitude": 53.123,
+              "longitude": 17.123
+            },
+            "images": [
+              {
+                "url": "https://www.olx.ua/advert-picture-1.jpg"
+              },
+              {
+                "url": "https://www.olx.ua/advert-picture-2.jpg"
+              }
+            ],
+            "price": {
+              "value": 123,
+              "currency": "PLN",
+              "negotiable": false,
+              "trade": false,
+              "budget": false
+            },
+            "salary": null,
+            "attributes": [
+              {
+                "code": "model",
+                "value": "cts",
+                "values": null
+              },
+              {
+                "code": "year",
+                "value": "2015",
+                "values": null
+              }
+            ],
+            "courier": null
+          }
+          ```
+          If status is `new`, it’s mean that advert will be activated soon (after moderation process). But if status is `limited` you must perform two extra steps:
+
+          * buy “packet” for a single advert (check out `/api/partner/adverts/ID/packets`) or whole category (check out `/api/partner/users/me/packets`).
+          * activate advert (checkout `/api/partner/adverts/ID/commands` - `activate` command)
+
+          After some time (usually few seconds) advert should become `active` and be visible to all users.
+
+          You can `deactivate` active advert with deactivate command (checkout `/api/partner/adverts/ID/commands`). You can activate inactive advert with activate command.
+
+          If you want to completely `remove` advert please use `DELETE /api/partner/adverts/{advertId}` endpoint.
+
+          You can buy extra paid features for active advert. For more details check out “Paid features” section.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - advertiser_type
+                - attributes
+                - category_id
+                - contact
+                - description
+                - location
+                - title
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                  description: >-
+                    May contain html tags (only in Jobs category)
+                    &#x3C;ul&#x3E;&#x3C;li&#x3E;&#x3C;strong&#x3E;&#x3C;em&#x3E;&#x3C;p&#x3E;
+                category_id:
+                  type: integer
+                advertiser_type:
+                  type: string
+                  enum:
+                    - private
+                    - business
+                external_url:
+                  type: string
+                  description: Advert's URL in origin system
+                external_id:
+                  type: string
+                  description: Advert's ID in origin system
+                contact:
+                  required:
+                    - name
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    phone:
+                      type: string
+                location:
+                  required:
+                    - city_id
+                  type: object
+                  properties:
+                    city_id:
+                      type: integer
+                    district_id:
+                      type: integer
+                      description: Required if city has districts.
+                    latitude:
+                      type: number
+                    longitude:
+                      type: number
+                images:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      url:
+                        type: string
+                price:
+                  type: object
+                  description: >-
+                    Used by most of the categories, i.e. cars, houses, clothes,
+                    etc. Required by most of the mentioned categories.
+                  properties:
+                    value:
+                      type: number
+                    currency:
+                      type: string
+                    negotiable:
+                      type: boolean
+                    trade:
+                      type: boolean
+                    budget:
+                      type: boolean
+                salary:
+                  type: object
+                  description: >-
+                    Used by some of the categories, i.e. jobs. Required by most
+                    of the mentioned categories.
+                  properties:
+                    value_from:
+                      type: number
+                    value_to:
+                      type: number
+                    currency:
+                      type: string
+                    negotiable:
+                      type: boolean
+                    type:
+                      type: string
+                      enum:
+                        - hourly
+                        - monthly
+                attributes:
+                  type: array
+                  items:
+                    required:
+                      - code
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        description: Code of an attribute
+                      value:
+                        type: string
+                        description: Required if attribute requires single value
+                      values:
+                        type: array
+                        description: Required if attribute allows to enter multiple values
+                        items:
+                          type: string
+                courier:
+                  type: boolean
+                  description: >-
+                    Is delivery possible. If true that means that delivery is
+                    possible. (Available in BG, KZ, PT, RO).
+                auto_extend_enabled:
+                  type: boolean
+                  description: >-
+                    Should the advert be automatically extended when it expires.
+                    Omitting this field means that auto extend is disabled.
+                product_safety_regulation:
+                  description: >-
+                    Product safety regulation details, required in some
+                    categories in EU. (Available in PL and RO countries)
+                  type: object
+                  properties: *ref_8
+                  example: *ref_9
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *ref_10
+      security:
+        - access_token:
+            - v2
+            - write
+  /adverts/{advertId}:
+    get:
+      tags:
+        - Adverts
+      summary: Get advert
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *ref_10
+      security:
+        - access_token:
+            - v2
+            - read
+    put:
+      tags:
+        - Adverts
+      summary: Update advert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - advertiser_type
+                - attributes
+                - category_id
+                - contact
+                - description
+                - location
+                - title
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                  description: May contain html tags (only in Jobs category)
+                category_id:
+                  type: integer
+                advertiser_type:
+                  type: string
+                  enum:
+                    - private
+                    - business
+                external_url:
+                  type: string
+                  description: Advert's URL in origin system
+                external_id:
+                  type: string
+                  description: Advert's ID in origin system
+                contact:
+                  required:
+                    - name
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    phone:
+                      type: string
+                location:
+                  required:
+                    - city_id
+                  type: object
+                  properties:
+                    city_id:
+                      type: integer
+                    district_id:
+                      type: integer
+                    latitude:
+                      type: number
+                    longitude:
+                      type: number
+                images:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      url:
+                        type: string
+                price:
+                  type: object
+                  properties:
+                    value:
+                      type: number
+                    currency:
+                      type: string
+                    negotiable:
+                      type: boolean
+                    trade:
+                      type: boolean
+                    budget:
+                      type: boolean
+                salary:
+                  type: object
+                  properties:
+                    value_from:
+                      type: number
+                    value_to:
+                      type: number
+                    currency:
+                      type: string
+                    negotiable:
+                      type: boolean
+                    type:
+                      type: string
+                      enum:
+                        - hourly
+                        - monthly
+                attributes:
+                  type: array
+                  items:
+                    required:
+                      - code
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                      value:
+                        type: string
+                      values:
+                        type: array
+                        items:
+                          type: string
+                courier:
+                  type: boolean
+                auto_extend_enabled:
+                  type: boolean
+                  description: >-
+                    Should the advert be automatically extended when it expires.
+                    Omitting this field means that auto extend is not changed.
+                product_safety_regulation:
+                  description: >-
+                    Product safety regulation details, required in some
+                    categories in EU. (Available in PL and RO countries)
+                  type: object
+                  properties: *ref_8
+                  example: *ref_9
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: *ref_10
+      security:
+        - access_token:
+            - v2
+            - write
+    delete:
+      tags:
+        - Adverts
+      summary: Delete advert
+      description: >
+        Permanently removes an advert. The advert MUST NOT be in `active` status
+        — deactivate it first via `POST /adverts/{advertId}/commands` with
+        `command: deactivate` (see "Delete advert - invalid status" in the
+        Errors section). Throttling cost: 5.
+      parameters: []
+      responses:
+        '204':
+          description: Status 204 - advert deleted successfully
+        '400':
+          description: >
+            Status 400 - validation error. Returned when the advert cannot be
+            removed by the authenticated partner. Common cases:
+
+            * the advert is in a non-deletable status (e.g. `active`) — `field:
+            ad`, `title: Invalid status`. Deactivate the advert first.
+
+            * the advert is not owned by the authenticated partner.
+        '404':
+          description: Status 404 - advert with the given `advertId` does not exist
+      security:
+        - access_token:
+            - v2
+            - write
+    parameters:
+      - name: advertId
+        in: path
+        required: true
+        schema:
+          type: integer
+  /adverts/{advertId}/commands:
+    post:
+      tags:
+        - Adverts
+      summary: Take action on advert
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - command
+              properties:
+                command:
+                  type: string
+                  description: >-
+                    Commands `activate` - to activate advert, `deactivate` - to
+                    deactivate active advert, `finish` - to move inactive advert
+                    (limited) to finished section, `extend` - to extend the
+                    activation period of the advert (not available in UA, PT).
+                  enum:
+                    - activate
+                    - deactivate
+                    - finish
+                    - extend
+                is_success:
+                  type: boolean
+                  description: >-
+                    If transaction was successful. Required for `deactivate`
+                    command.
+      responses:
+        '204':
+          description: Status 204
+      security:
+        - access_token:
+            - v2
+            - write
+    parameters:
+      - name: advertId
+        in: path
+        required: true
+        schema:
+          type: integer
+  /adverts/{advertId}/statistics:
+    get:
+      tags:
+        - Advert statistics
+      summary: Get advert statistics
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: &ref_26
+                type: object
+                properties:
+                  advert_views:
+                    type: integer
+                    description: The number of advert views
+                  phone_views:
+                    type: integer
+                    description: The number of phone views
+                  users_observing:
+                    type: integer
+                    description: The number of observers
+                example:
+                  advert_views: 123
+                  phone_views: 100
+                  users_observing: 10
+      security:
+        - access_token:
+            - v2
+            - read
+    parameters:
+      - name: advertId
+        in: path
+        required: true
+        schema:
+          type: integer
+        description: Advert ID
+  /adverts/{advertId}/moderation-reason:
+    get:
+      tags:
+        - Advert moderation reason
+      summary: Get moderation reason
+      parameters:
+        - name: advertId
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Advert ID
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email_notification:
+                    type: string
+                    description: The moderation reason provided in HTML format
+                example:
+                  email_notification: >-
+                    <p>Your advert was moderated because it promotes restricted
+                    items.</p>
+      security:
+        - access_token:
+            - v2
+            - read
+  /adverts/{advertId}/statistics/{statisticName}:
+    delete:
+      tags:
+        - Advert statistics
+      summary: Clear statistics
+      parameters: []
+      responses:
+        '204':
+          description: Status 204
+      security:
+        - access_token:
+            - v2
+            - write
+    parameters:
+      - name: advertId
+        in: path
+        required: true
+        schema:
+          type: integer
+        description: Advert ID
+      - name: statisticName
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+            - phone-views
+            - advert-views
+        description: Type of the statistic
+  /adverts/{advertId}/logos:
+    get:
+      tags:
+        - Advert logo
+      summary: Get advert logos
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_11
+                  type: object
+                  required:
+                    - id
+                    - url
+                  properties:
+                    id:
+                      type: integer
+                      description: Logo ID
+                    url:
+                      type: string
+                      description: Logo URL
+                  example:
+                    id: 1
+                    url: http://mydomain.com/logo.jpg
+      security:
+        - access_token:
+            - v2
+            - read
+    post:
+      tags:
+        - Advert logo
+      summary: Add logo
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - url
+              properties:
+                url:
+                  type: string
+                  description: Logo URL
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: *ref_11
+      security:
+        - access_token:
+            - v2
+            - write
+    parameters:
+      - name: advertId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Advert ID
+  /adverts/{advertId}/logos/{logoId}:
+    delete:
+      tags:
+        - Advert logo
+      summary: Delete logo
+      parameters: []
+      responses:
+        '204':
+          description: Status 204
+      security:
+        - access_token:
+            - v2
+            - write
+    parameters:
+      - name: advertId
+        in: path
+        required: true
+        schema:
+          type: integer
+        description: Advert ID
+      - name: logoId
+        in: path
+        required: true
+        schema:
+          type: integer
+        description: Logo ID
+  /users/me/account-balance:
+    get:
+      tags:
+        - Users
+      summary: Get account balance
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: &ref_27
+                type: object
+                required:
+                  - bonus
+                  - currency
+                  - refund
+                  - sum
+                  - wallet
+                properties:
+                  sum:
+                    type: number
+                  wallet:
+                    type: number
+                  bonus:
+                    type: number
+                  refund:
+                    type: number
+                  currency:
+                    type: string
+                example:
+                  sum: 6988.02
+                  wallet: 6988.02
+                  bonus: 0
+                  refund: 0
+                  currency: PLN
+      security:
+        - access_token:
+            - v2
+            - read
+  /users/me/payment-methods:
+    get:
+      tags:
+        - Users
+      summary: Get available payment methods
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: object
+                description: List of available payment methods
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: string
+                example:
+                  - account
+                  - postpaid
+      security:
+        - access_token:
+            - v2
+            - read
+  /users-business/me:
+    get:
+      tags:
+        - Users Business
+      summary: Get user business data
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: &ref_12
+                type: object
+                properties:
+                  id:
+                    type: number
+                  name:
+                    type: string
+                  description:
+                    type: string
+                  subdomain:
+                    type: string
+                  website_url:
+                    type: string
+                  address:
+                    type: object
+                    properties:
+                      street:
+                        type: string
+                      number:
+                        type: string
+                      postcode:
+                        type: string
+                      city:
+                        type: string
+                  phones:
+                    type: array
+                    items:
+                      type: string
+                  logo:
+                    type: object
+                    properties:
+                      url:
+                        type: string
+                  banner:
+                    type: object
+                    properties:
+                      url:
+                        type: object
+                example:
+                  id: 1
+                  name: My company name
+                  description: My company description
+                  subdomain: mysubdomain
+                  website_url: http://website.com
+                  address:
+                    street: Street
+                    number: 123
+                    postcode: 12-456
+                    city: City Name
+                  phones:
+                    - 123456789
+                  logo:
+                    url: https://www.olx.ua/logo.jpg
+                  banner:
+                    url: https://www.olx.ua/banner.jpg
+      security:
+        - access_token:
+            - v2
+            - read
+    put:
+      tags:
+        - Users Business
+      summary: Update user business data
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                subdomain:
+                  type: string
+                website_url:
+                  type: string
+                address:
+                  type: object
+                  properties:
+                    street:
+                      type: string
+                    number:
+                      type: string
+                    postcode:
+                      type: string
+                    city:
+                      type: string
+                phones:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema: *ref_12
+      security:
+        - access_token:
+            - v2
+            - write
+  /users-business/me/logos:
+    get:
+      tags:
+        - Users Business
+      summary: Get user business logos
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_13
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    url:
+                      type: string
+                  example:
+                    id: 123
+                    url: https://www.olx.ua/logo.jpg
+      security:
+        - access_token:
+            - v2
+            - read
+    post:
+      tags:
+        - Users Business
+      summary: Set user business logo
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - url
+              properties:
+                url:
+                  type: string
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: *ref_13
+      security:
+        - access_token:
+            - v2
+            - write
+  /users-business/me/logos/{logoId}:
+    delete:
+      tags:
+        - Users Business
+      summary: Remove user business logo
+      parameters: []
+      responses:
+        '204':
+          description: Status 204
+      security:
+        - access_token:
+            - v2
+            - write
+    parameters:
+      - name: logoId
+        in: path
+        required: true
+        schema:
+          type: integer
+  /users-business/me/banners:
+    get:
+      tags:
+        - Users Business
+      summary: Get user business banners
+      parameters: []
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_14
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    url:
+                      type: string
+                  example:
+                    id: 123
+                    url: https://www.olx.ua/banner.jpg
+      security:
+        - access_token:
+            - v2
+            - read
+    post:
+      tags:
+        - Users Business
+      summary: Set user business banner
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - url
+              properties:
+                url:
+                  type: string
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: *ref_14
+      security:
+        - access_token:
+            - v2
+            - write
+  /users-business/me/banners/{bannerId}:
+    delete:
+      tags:
+        - Users Business
+      summary: Remove user business banner
+      parameters: []
+      responses:
+        '204':
+          description: Status 204
+      security:
+        - access_token:
+            - v2
+            - write
+    parameters:
+      - name: bannerId
+        in: path
+        required: true
+        schema:
+          type: integer
+  /packets:
+    get:
+      tags:
+        - Packets
+      summary: Get available packets
+      parameters:
+        - name: category_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: payment_method
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - account
+              - postpaid
+          description: Payment method
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - base
+              - mega
+              - all
+          description: Packet type. 'base' by default, use 'all' to fetch both types
+        - name: with_features
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum:
+              - 0
+              - 1
+          description: Optional field to return features in response
+        - name: zone_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >-
+            Field to specify location zone - it's required for categories with
+            enabled "Regional pricing" feature. (Available in UA)
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_23
+                  type: object
+                  required:
+                    - category_id
+                    - size
+                  properties:
+                    size:
+                      type: integer
+                    category_id:
+                      type: integer
+                    name:
+                      type: string
+                    price:
+                      type: number
+                    is_premium:
+                      type: boolean
+                    type:
+                      type: string
+                    features:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          key:
+                            type: string
+                          label:
+                            type: string
+                  example:
+                    size: 50
+                    category_id: 164
+                    name: Pakiet 50 ogłoszeń
+                    price: 2091
+                    is_premium: false
+                    type: base
+                    features:
+                      - key: bundles.packet.feature.business_page
+                        label: Strona firmowa
+                      - key: bundles.packet.feature.logo
+                        label: Logo firmy na stronie ogłoszenia
+        '400':
+          description: Status 400
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_15
+                  type: object
+                  required:
+                    - error
+                  properties:
+                    error:
+                      required:
+                        - detail
+                        - status
+                        - title
+                      type: object
+                      properties:
+                        status:
+                          type: integer
+                        title:
+                          type: string
+                        detail:
+                          type: string
+                        validation:
+                          type: array
+                          description: This section appears only on validation errors
+                          items:
+                            type: object
+                            properties:
+                              field:
+                                type: string
+                                description: Indicates which field cause error
+                              title:
+                                type: string
+                                description: Short description of error
+                              detail:
+                                type: string
+                                description: Detailed information about error
+                  example:
+                    error:
+                      status: 400
+                      title: Invalid request
+                      detail: Data validation error occurred
+                      validation:
+                        - field: title
+                          title: Musisz podać tytuł
+                          detail: Musisz podać tytuł
+                        - field: description
+                          title: Musisz podać opis
+                          detail: Musisz podać opis
+      security:
+        - access_token:
+            - v2
+            - read
+  /zones:
+    get:
+      tags:
+        - Packets
+      summary: >-
+        Get available location zones - regional pricing feature has to be
+        enabled (Available in UA)
+      parameters:
+        - name: category_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_24
+                  type: object
+                  required:
+                    - id
+                    - whole_country
+                    - whole_region
+                    - labels
+                    - sub_zones
+                  properties:
+                    id:
+                      type: string
+                    whole_country:
+                      type: boolean
+                    whole_region:
+                      type: boolean
+                    labels:
+                      type: object
+                    sub_zones:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - id
+                          - labels
+                        properties:
+                          id:
+                            type: string
+                          labels:
+                            type: object
+                  example:
+                    id: 99040cfe-d68c-416f-85a9-1401cfa5f109
+                    whole_country: false
+                    whole_region: true
+                    labels:
+                      - uk: Київ область
+                        ru: Киев область
+                    sub_zones:
+                      - id: 2f7a4320-c16f-4117-81a2-50fdb1fa51eb
+                        labels:
+                          - uk: Київ
+                            ru: Киев
+        '400':
+          description: Status 400
+          content:
+            application/json:
+              schema:
+                type: array
+                items: *ref_15
+      security:
+        - access_token:
+            - v2
+            - read
+  /users/me/packets:
+    get:
+      tags:
+        - Packets
+      summary: Get bought packets
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Number of results [default 50]
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Starting element
+        - name: availability
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - active
+              - inactive
+          description: availability filter
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - expired_at
+              - activated_at
+          description: descending order
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: array
+                items: &ref_25
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    name:
+                      type: string
+                    is_active:
+                      type: boolean
+                    size:
+                      type: integer
+                    left:
+                      type: integer
+                    active_to:
+                      type: string
+                    price:
+                      type: number
+                    categories_labels:
+                      type: array
+                      items:
+                        type: string
+                    categories_ids:
+                      type: array
+                      items:
+                        type: integer
+                    location_name:
+                      type: string
+                      description: location name with enabled "Regional pricing" feature.
+                    zone_id:
+                      type: string
+                      description: >-
+                        location zone_id, added for regional packages when zone
+                        configuration is still available for the same region and
+                        cities (Available in UA)
+                  example:
+                    id: 23423-dfdf-3432-df
+                    name: Pakiet 10 ogłoszeń
+                    is_active: true
+                    size: 10
+                    left: 9
+                    active_to: '2018-05-14 11:49:30'
+                    price: 430.5
+                    categories_labels:
+                      - Praca
+                    categories_ids:
+                      - 1
+                      - 2
+                      - 3
+                    zone_id: a257ef6a-673e-49f5-b903-eea4c775b74c
+                    location_name: Region without Main City
+      security:
+        - access_token:
+            - v2
+            - read
+    post:
+      tags:
+        - Packets
+      summary: Purchase packet
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - category_id
+                - payment_method
+                - size
+              properties:
+                payment_method:
+                  type: string
+                  enum:
+                    - account
+                    - postpaid
+                category_id:
+                  type: integer
+                size:
+                  type: integer
+                  description: Size of the packet. This value should not be equal to 1.
+                type:
+                  type: string
+                  enum:
+                    - base
+                    - mega
+                  description: Packet type. 'base' by default
+                zone_id:
+                  type: string
+                  description: >-
+                    Field to specify location zone - it's required for
+                    categories with enabled "Regional pricing" feature.
+                    (Available in UA)
+      responses:
+        '204':
+          description: Status 204
+        '400':
+          description: Status 400
+          content:
+            application/json:
+              schema:
+                type: array
+                items: *ref_15
+      security:
+        - access_token:
+            - v2
+            - write
+  /adverts/{advertId}/packets:
+    post:
+      tags:
+        - Packets
+      summary: Purchase packet for an advert
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - payment_method
+              properties:
+                payment_method:
+                  type: string
+                  enum:
+                    - account
+                    - postpaid
+                is_premium:
+                  type: boolean
+                  description: Type of the packet. Set `true` to choose premium packet.
+      responses:
+        '204':
+          description: Status 204
+      security:
+        - access_token:
+            - v2
+            - write
+    parameters:
+      - name: advertId
+        in: path
+        required: true
+        schema:
+          type: string
+  /users/me/billing:
+    get:
+      tags:
+        - Payments
+      summary: Get billing
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Page number, starts from 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Number of results per page
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  - id: 56
+                    name: Pakiet 10 ogłoszeń
+                    date: '2018-04-09 13:08:27'
+                    price: -430.5
+                    advert_id: 1234567
+      security:
+        - access_token:
+            - v2
+            - read
+  /users/me/prepaid-invoices:
+    get:
+      tags:
+        - Payments
+      summary: Get prepaid invoices
+      description: This endpoint is available only for BG and PL.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Page number, starts from 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Number of results per page
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  - payment_id: 53
+                    name: Pakiet 10 ogłoszeń
+                    amount: 430.5
+                    amount_formatted: 430,50 zł
+                    advert_id: 1234567
+      security:
+        - access_token:
+            - v2
+            - read
+  /users/me/postpaid-invoices:
+    get:
+      tags:
+        - Payments
+      summary: Get postpaid invoices
+      description: This endpoint is available only for OLX.pl
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Page numbers, starts from 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Number of results per page
+      responses:
+        '200':
+          description: Status 200
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  - invoice_id: 2018/12345
+                    issue_date: 2018-03-31T00:00:00.000Z
+                    due_date: 2018-04-14T00:00:00.000Z
+                    amount_gross: 430.5
+                    amount_net: 350
+                    amount_formatted: 430,50 zł
+                    advert_id: 1234567
+      security:
+        - access_token:
+            - v2
+            - read
+components:
+  securitySchemes:
+    access_token:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://www.olx.ua/oauth/authorize
+          tokenUrl: https://www.olx.ua/api/open/oauth/token
+          refreshUrl: https://www.olx.ua/api/open/oauth/token
+          scopes:
+            v2: access to api v2
+            write: modify resources
+            read: read resources
+        clientCredentials:
+          tokenUrl: https://www.olx.ua/api/open/oauth/token
+          refreshUrl: https://www.olx.ua/api/open/oauth/token
+          scopes:
+            v2: access to api v2
+            write: modify resources
+            read: read resources
+  schemas:
+    AuthenticatedUser: *ref_16
+    User: *ref_17
+    Region: *ref_0
+    District: *ref_2
+    City: *ref_1
+    Language: *ref_18
+    Currency: *ref_19
+    Category: *ref_3
+    CategorySuggestion: *ref_20
+    Attribute: *ref_21
+    Thread: *ref_4
+    Message: *ref_5
+    PaidFeature: *ref_22
+    Packet: *ref_23
+    LocationZone: *ref_24
+    BoughtPacket: *ref_25
+    Statistics: *ref_26
+    Logo: *ref_11
+    AccountBalance: *ref_27
+    UserBusinessData: *ref_12
+    BusinessUserLogo: *ref_13
+    BusinessUserBanner: *ref_14
+    Advert: *ref_10
+    Error: *ref_15
+    ProductSafetyRegulation:
+      type: object
+      properties: *ref_8
+      example: *ref_9
+    ProductSafetyRegulationsParty:
+      type: object
+      properties: *ref_6
+      example: *ref_7
+security:
+  - access_token:
+      - v2
