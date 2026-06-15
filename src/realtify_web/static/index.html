@@ -94,6 +94,28 @@
       color: var(--warn);
     }
 
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logout-form {
+      margin: 0;
+    }
+
+    .logout-button {
+      min-height: 36px;
+      padding: 7px 12px;
+      background: #fff;
+      color: var(--brand-strong);
+    }
+
+    .logout-button:hover {
+      border-color: var(--brand);
+      background: #eef6fb;
+    }
+
     .grid {
       display: grid;
       grid-template-columns: minmax(420px, 0.88fr) minmax(520px, 1.12fr);
@@ -348,6 +370,11 @@
         white-space: normal;
       }
 
+      .top-actions {
+        align-items: stretch;
+        flex-wrap: wrap;
+      }
+
       .log {
         min-height: 320px;
       }
@@ -361,7 +388,12 @@
         <h1>Realtify</h1>
         <div class="subtitle">PDF -> аналоги -> Excel -> Word -> validation</div>
       </div>
-      <div id="health" class="health">Проверка среды...</div>
+      <div class="top-actions">
+        <div id="health" class="health">Проверка среды...</div>
+        <form class="logout-form" method="post" action="/logout">
+          <button class="logout-button" type="submit">Выйти</button>
+        </form>
+      </div>
     </header>
 
     <div class="grid">

@@ -217,7 +217,7 @@ To launch the FastAPI web preview:
 
 Then open `http://127.0.0.1:8765`. The web UI accepts a PDF bundle, Excel template, optional Word template, optional link list, object type, and page range. It runs the batch workflow in a background thread, shows timestamped progress events, and publishes a review zip when the job finishes.
 
-Set `REALTIFY_WEB_USERNAME` and `REALTIFY_WEB_PASSWORD` to require HTTP Basic Auth for every web route:
+Set `REALTIFY_WEB_USERNAME` and `REALTIFY_WEB_PASSWORD` to enable the built-in login page and protect every web route with a signed session cookie:
 
 ```powershell
 $env:REALTIFY_WEB_USERNAME = "autovalue"
