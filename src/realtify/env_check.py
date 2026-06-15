@@ -8,7 +8,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
-from realtify.paths import PLAYWRIGHT_BROWSERS_ROOT, PROJECT_ROOT, TESSDATA_DIR, find_poppler_bin, find_tesseract
+from realtify.paths import PLAYWRIGHT_BROWSERS_ROOT, PROJECT_ROOT, find_poppler_bin, find_tessdata_dir, find_tesseract
 
 
 REQUIRED_MODULES = [
@@ -51,9 +51,10 @@ def _command_output(args: list[str]) -> str:
 def collect_status() -> dict[str, object]:
     tesseract = find_tesseract()
     poppler_bin = find_poppler_bin()
+    tessdata_dir = find_tessdata_dir()
     langs = []
-    if TESSDATA_DIR.exists():
-        langs = sorted(p.stem for p in TESSDATA_DIR.glob("*.traineddata"))
+    if tessdata_dir:
+        langs = sorted(p.stem for p in tessdata_dir.glob("*.traineddata"))
     playwright_browsers = []
     if PLAYWRIGHT_BROWSERS_ROOT.exists():
         playwright_browsers = sorted(p.name for p in PLAYWRIGHT_BROWSERS_ROOT.iterdir() if p.is_dir())
@@ -65,7 +66,7 @@ def collect_status() -> dict[str, object]:
         "tesseract_version": _command_output([str(tesseract), "--version"])
         if tesseract
         else None,
-        "tessdata_dir": TESSDATA_DIR if TESSDATA_DIR.exists() else None,
+        "tessdata_dir": tessdata_dir,
         "ocr_languages": langs,
         "poppler_bin": poppler_bin,
         "pdfinfo_version": _command_output([str(poppler_bin / "pdfinfo.exe"), "-v"])

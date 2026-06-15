@@ -6,18 +6,24 @@ from pathlib import Path
 import pytesseract
 from PIL import Image
 
-from realtify.paths import TESSDATA_DIR, find_tesseract
+from realtify.paths import find_tessdata_dir, find_tesseract
 
 
-def configure_tesseract() -> None:
+def configure_tesseract() -> Path | None:
     tesseract = find_tesseract()
     if tesseract:
         pytesseract.pytesseract.tesseract_cmd = str(tesseract)
-    os.environ["TESSDATA_PREFIX"] = str(TESSDATA_DIR)
+    tessdata_dir = find_tessdata_dir()
+    if tessdata_dir:
+        os.environ["TESSDATA_PREFIX"] = str(tessdata_dir)
+    return tessdata_dir
 
 
 def ocr_image(image_path: Path, *, lang: str = "ukr+rus+eng") -> str:
-    configure_tesseract()
-    config = f"--tessdata-dir {TESSDATA_DIR} --psm 6"
+    tessdata_dir = configure_tesseract()
+    config_parts = []
+    if tessdata_dir:
+        config_parts.append(f'--tessdata-dir "{tessdata_dir}"')
+    config_parts.extend(["--psm", "6"])
     with Image.open(image_path) as image:
-        return pytesseract.image_to_string(image, lang=lang, config=config).strip()
+        return pytesseract.image_to_string(image, lang=lang, config=" ".join(config_parts)).strip()

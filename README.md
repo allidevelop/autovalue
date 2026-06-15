@@ -32,7 +32,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe scripts\check_env.py
 ```
 
-Tesseract is installed globally, while Ukrainian and Russian OCR language data is stored in `tools/tessdata`.
+Tesseract can use bundled language data from `tools/tessdata` or the system tessdata directory, for example `/usr/share/tesseract-ocr/5/tessdata` on Linux.
 Portable Poppler is stored in `tools/poppler`.
 
 To smoke-test OCR on a scanned PDF:
