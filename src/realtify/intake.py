@@ -348,7 +348,7 @@ def _parse_extract(page: int, text: str) -> ExtractRecord | None:
     lowered = normalized.casefold()
     if "витяг" not in lowered or "реєстр" not in lowered or "речов" not in lowered:
         return None
-    address = _line_after_label(normalized, "Адреса")
+    address = _line_after_label(normalized, "Адреса") or _extract_address_from_text(normalized)
     object_description = _line_after_label(normalized, "Опис об'єкта") or _line_after_label(normalized, "Опис об’скта")
     total_area, living_area = _parse_areas(normalized)
     owners = _block_after_label(normalized, "Власники", end_markers=["Витяг сформував", "Підпис"])
@@ -610,6 +610,22 @@ def _parse_areas(text: str) -> tuple[float | None, float | None]:
             r"Житлова\s+площа\s+приміщень[^\d]*(\d+[.,]\d+)",
         ],
     )
+    if total is None:
+        total = _match_decimal(
+            text,
+            [
+                r"Загальна\s+площа\s*\([^)]{0,12}\)\s*[:;]\s*(\d+[.,]\d+)",
+                r"Загальна\s+площа[^\n\r:]{0,24}\s*[:;]\s*(\d+[.,]\d+)",
+            ],
+        )
+    if living is None:
+        living = _match_decimal(
+            text,
+            [
+                r"житлова\s+площа\s*\([^)]{0,12}\)\s*[:;]\s*(\d+[.,]\d+)",
+                r"житлова\s+площа[^\n\r:]{0,24}\s*[:;]\s*(\d+[.,]\d+)",
+            ],
+        )
     return total, living
 
 
@@ -644,6 +660,18 @@ def _tech_address_from_text(text: str) -> str | None:
     return _clean_line(match.group(1)) if match else None
 
 
+def _extract_address_from_text(text: str) -> str | None:
+    patterns = [
+        r"(м\.\s*Київ[^\n\r]{0,180}(?:квартира|квертира|кв\.?/оф\.?)\s*\d{1,5})",
+        r"(Київ[^\n\r]{0,180}(?:квартира|квертира|кв\.?/оф\.?)\s*\d{1,5})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return _clean_line(match.group(1))
+    return None
+
+
 def _normalize_text(text: str) -> str:
     replacements = {
         "\xa0": " ",
@@ -669,6 +697,7 @@ def _normalize_address(address: str | None) -> str | None:
     value = _clean_line(address)
     value = value.replace("17- | К", "17-К").replace("17- К", "17-К").replace("17-K", "17-К")
     value = value.replace("кв./оф.", "квартира")
+    value = re.sub(r"\bквертира\b", "квартира", value, flags=re.IGNORECASE)
     value = value.replace("інший ", "")
     value = value.replace("(місце ", "")
     value = re.sub(r"\s*,\s*", ", ", value)
@@ -699,7 +728,7 @@ def _parse_city(address: str | None) -> str | None:
 
 
 def _parse_apartment_number(text: str) -> str | None:
-    match = re.search(r"(?:квартира|кв\.?/оф\.?|Квартира\s*№)\s*([0-9]{1,5})", text, re.IGNORECASE)
+    match = re.search(r"(?:квартира|квертира|кв\.?/оф\.?|Квартира\s*№)\s*([0-9]{1,5})", text, re.IGNORECASE)
     return match.group(1) if match else None
 
 
