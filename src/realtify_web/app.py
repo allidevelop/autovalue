@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import hmac
 import os
 import re
 import shutil
@@ -13,8 +16,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from realtify.batch_workflow import BatchWorkflowResult, run_batch_workflow
@@ -55,6 +58,23 @@ class WebJob:
 app = FastAPI(title="Realtify Web", version="0.1.0")
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.middleware("http")
+async def basic_auth_middleware(request: Request, call_next: Any) -> Response:
+    username = os.getenv("REALTIFY_WEB_USERNAME")
+    password = os.getenv("REALTIFY_WEB_PASSWORD")
+    if not username or not password:
+        return await call_next(request)
+
+    if _basic_auth_valid(request.headers.get("authorization"), username=username, password=password):
+        return await call_next(request)
+
+    return Response(
+        "Authentication required",
+        status_code=401,
+        headers={"WWW-Authenticate": 'Basic realm="Autovalue", charset="UTF-8"'},
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -300,6 +320,19 @@ def _python_xls_backend_available() -> bool:
     except Exception:
         return False
     return True
+
+
+def _basic_auth_valid(header: str | None, *, username: str, password: str) -> bool:
+    if not header or not header.lower().startswith("basic "):
+        return False
+    try:
+        payload = base64.b64decode(header.split(" ", 1)[1], validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    supplied_username, separator, supplied_password = payload.partition(":")
+    if not separator:
+        return False
+    return hmac.compare_digest(supplied_username, username) and hmac.compare_digest(supplied_password, password)
 
 
 def _append_event(job_id: str, message: str) -> None:

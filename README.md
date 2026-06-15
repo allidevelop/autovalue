@@ -217,6 +217,13 @@ To launch the FastAPI web preview:
 
 Then open `http://127.0.0.1:8765`. The web UI accepts a PDF bundle, Excel template, optional Word template, optional link list, object type, and page range. It runs the batch workflow in a background thread, shows timestamped progress events, and publishes a review zip when the job finishes.
 
+Set `REALTIFY_WEB_USERNAME` and `REALTIFY_WEB_PASSWORD` to require HTTP Basic Auth for every web route:
+
+```powershell
+$env:REALTIFY_WEB_USERNAME = "autovalue"
+$env:REALTIFY_WEB_PASSWORD = "change-this-password"
+```
+
 The web app can now run report generation on Linux when the uploaded Excel template is legacy `.xls`. Microsoft Excel COM remains supported on Windows, but is no longer required for the server path.
 
 Valuation date source is resolved in this order:
