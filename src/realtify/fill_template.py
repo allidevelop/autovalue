@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -13,7 +14,8 @@ import yaml
 from pydantic import BaseModel, Field
 from rich.console import Console
 
-from realtify.excel_tools import ExcelApp, excel_path
+from realtify.excel_sidecar import build_calculation_sidecar_payload, write_excel_sidecar
+from realtify.excel_tools import ExcelApp, excel_com_available, excel_path
 from realtify.models import Comparable
 from realtify.paths import PROJECT_ROOT, RESOURCE_ROOT, ensure_output_dir
 
@@ -39,6 +41,8 @@ class FillResult:
     output_path: Path
     filled_count: int
     warnings: list[str]
+    engine: str = ""
+    metadata_path: Path | None = None
 
 
 def load_template_profile(path: Path) -> TemplateProfile:
@@ -79,6 +83,43 @@ def fill_excel_template(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(template_path, output_path)
 
+    backend = _select_excel_backend(template_path=template_path)
+    if backend == "com":
+        metadata_path = _fill_with_excel_com(
+            output_path=output_path,
+            profile=profile,
+            selected=selected,
+            target=target,
+            visible=visible,
+        )
+    elif backend == "python-xls":
+        metadata_path = _fill_with_python_xls(
+            template_path=template_path,
+            output_path=output_path,
+            profile=profile,
+            selected=selected,
+            target=target,
+        )
+    else:
+        raise FillError(f"Unsupported Excel backend: {backend}")
+
+    return FillResult(
+        output_path=output_path,
+        filled_count=len(selected),
+        warnings=warnings,
+        engine=backend,
+        metadata_path=metadata_path,
+    )
+
+
+def _fill_with_excel_com(
+    *,
+    output_path: Path,
+    profile: TemplateProfile,
+    selected: list[Comparable],
+    target: dict[str, Any] | None,
+    visible: bool,
+) -> Path | None:
     with ExcelApp(visible=visible) as excel:
         wb = excel.Workbooks.Open(excel_path(output_path), 0, False)
         try:
@@ -90,8 +131,52 @@ def fill_excel_template(
             wb.Save()
         finally:
             wb.Close(True)
+    return None
 
-    return FillResult(output_path=output_path, filled_count=len(selected), warnings=warnings)
+
+def _fill_with_python_xls(
+    *,
+    template_path: Path,
+    output_path: Path,
+    profile: TemplateProfile,
+    selected: list[Comparable],
+    target: dict[str, Any] | None,
+) -> Path:
+    if template_path.suffix.lower() != ".xls":
+        raise FillError(
+            "The cross-platform Python backend currently supports legacy .xls templates only. "
+            "Use an .xls template or set REALTIFY_EXCEL_ENGINE=com on Windows."
+        )
+    try:
+        import xlrd
+        from xlutils.copy import copy as copy_workbook
+    except Exception as exc:
+        raise FillError(f"Python XLS backend dependencies are unavailable: {exc}") from exc
+
+    source_book = xlrd.open_workbook(str(template_path), formatting_info=True)
+    sheet_index = _find_xlrd_sheet_index(source_book, profile.sheet_name)
+    source_sheet = source_book.sheet_by_index(sheet_index)
+    template_rows = _read_template_rows(source_sheet, start=15, end=43, date_mode=source_book.datemode)
+    output_book = copy_workbook(source_book)
+    output_sheet = output_book.get_sheet(sheet_index)
+    output_sheet._cell_overwrite_ok = True
+
+    protected = _protected_cells(profile)
+    _fill_comparables_xls(output_sheet, profile, selected, protected)
+    if target:
+        _fill_target_xls(output_sheet, profile, target, protected)
+
+    payload = build_calculation_sidecar_payload(
+        excel_path=output_path,
+        engine="python-xls",
+        profile_name=profile.profile,
+        candidates=selected,
+        target=target,
+        template_rows=template_rows,
+    )
+    _write_calculated_values_xls(output_sheet, payload)
+    output_book.save(str(output_path))
+    return write_excel_sidecar(output_path, payload)
 
 
 def _validate_candidates(
@@ -121,6 +206,29 @@ def _validate_candidates(
     return warnings
 
 
+def _select_excel_backend(*, template_path: Path) -> str:
+    requested = os.getenv("REALTIFY_EXCEL_ENGINE", "auto").strip().lower()
+    aliases = {
+        "win32": "com",
+        "excel": "com",
+        "python": "python-xls",
+        "xls": "python-xls",
+    }
+    requested = aliases.get(requested, requested)
+    if requested in {"com", "python-xls"}:
+        return requested
+    if requested != "auto":
+        raise FillError(f"Unsupported REALTIFY_EXCEL_ENGINE value: {requested}")
+    if excel_com_available():
+        return "com"
+    if template_path.suffix.lower() == ".xls":
+        return "python-xls"
+    raise FillError(
+        "No Excel backend is available. Install Microsoft Excel on Windows, "
+        "or use an .xls template with the cross-platform Python backend."
+    )
+
+
 def _fill_comparables(ws: Any, profile: TemplateProfile, candidates: list[Comparable], protected: set[tuple[int, int]]) -> None:
     for col_index, column in enumerate(profile.comparables_columns):
         col_num = _column_to_number(column)
@@ -139,6 +247,22 @@ def _fill_comparables(ws: Any, profile: TemplateProfile, candidates: list[Compar
                 cell.Value = value
 
 
+def _fill_comparables_xls(
+    ws: Any,
+    profile: TemplateProfile,
+    candidates: list[Comparable],
+    protected: set[tuple[int, int]],
+) -> None:
+    for col_index, column in enumerate(profile.comparables_columns):
+        col_num = _column_to_number(column)
+        candidate = candidates[col_index] if col_index < len(candidates) else None
+        for field, row in profile.field_mapping.items():
+            if (row, col_num) in protected:
+                continue
+            value = _candidate_value(candidate, field) if candidate else None
+            _write_xls_cell(ws, row, col_num, value)
+
+
 def _fill_target(ws: Any, profile: TemplateProfile, target: dict[str, Any], protected: set[tuple[int, int]]) -> None:
     if not profile.target_column:
         return
@@ -151,6 +275,80 @@ def _fill_target(ws: Any, profile: TemplateProfile, target: dict[str, Any], prot
         value = _target_value(target, field)
         if value is not None:
             cell.Value = value
+
+
+def _fill_target_xls(ws: Any, profile: TemplateProfile, target: dict[str, Any], protected: set[tuple[int, int]]) -> None:
+    if not profile.target_column:
+        return
+    col_num = _column_to_number(profile.target_column)
+    for field, row in profile.field_mapping.items():
+        if field == "source_url" or (row, col_num) in protected:
+            continue
+        _write_xls_cell(ws, row, col_num, _target_value(target, field))
+
+
+def _write_calculated_values_xls(ws: Any, payload: dict[str, Any]) -> None:
+    raw_rows = payload.get("raw_adjustment_rows") or {}
+    for row_key, row_values in raw_rows.items():
+        row_index = int(row_key)
+        if not isinstance(row_values, list):
+            continue
+        for col_index, value in enumerate(row_values[:8], start=1):
+            _write_xls_cell(ws, row_index, col_index, value)
+
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    _write_xls_cell(ws, 44, 5, summary.get("market_value_usd"))
+    _write_xls_cell(ws, 44, 6, summary.get("market_value_uah"))
+
+
+def _write_xls_cell(ws: Any, row: int, col: int, value: Any) -> None:
+    if value is None:
+        value = ""
+    if hasattr(value, "unicode_string"):
+        value = str(value)
+    ws.write(row - 1, col - 1, value)
+
+
+def _find_xlrd_sheet_index(book: Any, preferred_name: str) -> int:
+    names = book.sheet_names()
+    for index, name in enumerate(names):
+        if name == preferred_name:
+            return index
+    preferred = preferred_name.casefold()
+    for index, name in enumerate(names):
+        if preferred and preferred in name.casefold():
+            return index
+    for index, sheet in enumerate(book.sheets()):
+        if sheet.nrows >= 44 and sheet.ncols >= 8:
+            return index
+    return 0
+
+
+def _read_template_rows(sheet: Any, *, start: int, end: int, date_mode: int) -> dict[int, list[Any]]:
+    rows: dict[int, list[Any]] = {}
+    for row_index in range(start, end + 1):
+        row: list[Any] = []
+        for col_index in range(1, 9):
+            row.append(_xlrd_cell_value(sheet, row_index, col_index, date_mode=date_mode))
+        rows[row_index] = row
+    return rows
+
+
+def _xlrd_cell_value(sheet: Any, row: int, col: int, *, date_mode: int) -> Any:
+    try:
+        cell = sheet.cell(row - 1, col - 1)
+    except IndexError:
+        return ""
+    if cell.ctype == 0:
+        return ""
+    if cell.ctype == 3:
+        try:
+            import xlrd
+
+            return xlrd.xldate.xldate_as_datetime(cell.value, date_mode).date()
+        except Exception:
+            return cell.value
+    return cell.value
 
 
 def _candidate_value(candidate: Comparable, field: str) -> Any:

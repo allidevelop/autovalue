@@ -14,10 +14,12 @@ from pydantic import ValidationError
 from rich.console import Console
 
 from realtify.excel_summary import read_excel_report_values
+from realtify.excel_sidecar import sidecar_adjustment_rows
 from realtify.excel_tools import excel_path
 from realtify.intake import IntakeResult
 from realtify.models import Comparable
 from realtify.paths import PROJECT_ROOT, ensure_output_dir
+from realtify.valuation_date import resolve_valuation_date
 from realtify.word_tools import (
     WordTemplateError,
     add_hyperlink,
@@ -170,7 +172,7 @@ def build_report_values(
     excel_payload = excel_values or {}
     today = date.today()
     report_date_obj = _parse_date(_first_not_empty(task.get("report_date"), target.get("report_date"))) or today
-    valuation_date_obj = _parse_date(_first_not_empty(task.get("valuation_date"), target.get("valuation_date"))) or today
+    valuation_date_obj = resolve_valuation_date(task=task, excel_path=excel_path)
     address_parts = _address_parts(address)
     rooms_text = _rooms_text(rooms)
     total_area_text = _format_decimal_comma(total_area)
@@ -486,11 +488,14 @@ def _fill_existing_adjustment_table(table, excel_rows: dict[int, list[str]]) -> 
 
 
 def _read_adjustment_rows_from_excel(path: Path) -> dict[int, list[str]]:
+    sidecar_rows = sidecar_adjustment_rows(path)
+    if sidecar_rows:
+        return sidecar_rows
     try:
         import pythoncom
         import win32com.client
     except Exception as exc:
-        raise WordTemplateError(f"Excel COM is unavailable for Word adjustment table: {exc}") from exc
+        return {}
 
     rows: dict[int, list[str]] = {}
     pythoncom.CoInitialize()

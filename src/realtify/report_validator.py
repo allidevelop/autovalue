@@ -14,6 +14,7 @@ from docx import Document
 from pydantic import ValidationError
 from rich.console import Console
 
+from realtify.excel_sidecar import sidecar_adjustment_rows, sidecar_visible_text
 from realtify.excel_tools import ExcelApp, excel_path
 from realtify.intake import IntakeResult
 from realtify.models import Comparable
@@ -466,6 +467,9 @@ def _find_adjustment_table(document):
 
 
 def _read_adjustment_rows_from_excel(path: Path) -> dict[int, list[str]]:
+    sidecar_rows = sidecar_adjustment_rows(path)
+    if sidecar_rows:
+        return sidecar_rows
     rows: dict[int, list[str]] = {}
     with ExcelApp() as excel:
         wb = excel.Workbooks.Open(excel_path(path), 0, True)
@@ -479,6 +483,9 @@ def _read_adjustment_rows_from_excel(path: Path) -> dict[int, list[str]]:
 
 
 def _excel_visible_text(path: Path) -> str:
+    sidecar_text = sidecar_visible_text(path)
+    if sidecar_text:
+        return sidecar_text
     values: list[str] = []
     with ExcelApp() as excel:
         wb = excel.Workbooks.Open(excel_path(path), 0, True)

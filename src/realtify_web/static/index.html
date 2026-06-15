@@ -545,6 +545,9 @@
         if (health.excel_com_available) {
           healthEl.className = "health ok";
           healthEl.textContent = "Excel COM доступен, генерация включена";
+        } else if (health.python_xls_backend_available || health.calculation_available) {
+          healthEl.className = "health ok";
+          healthEl.textContent = "Python XLS backend доступен, генерация включена";
         } else {
           healthEl.className = "health warn";
           healthEl.textContent = "Excel COM недоступен: это preview без полного расчета";
@@ -589,4 +592,3 @@
   </script>
 </body>
 </html>
-

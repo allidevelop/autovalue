@@ -194,24 +194,21 @@ storage/jobs/<job_id>/
       ...
 ```
 
-## Main Technical Blocker
+## Excel Runtime
 
-The current Excel writer uses Microsoft Excel COM, which is Windows-only.
+The first version used Microsoft Excel COM, which is Windows-only. The current MVP has a server-safe fallback:
 
-Migration options:
+- `com`: Microsoft Excel COM on Windows.
+- `python-xls`: cross-platform legacy `.xls` writer plus a calculation sidecar.
+- `auto`: COM when available, otherwise Python `.xls`.
 
-1. Short-term web MVP on a Windows server with Excel installed.
-   - Fastest, but fragile and not cloud-native.
-2. Convert `.xls` templates to `.xlsx` and write with `openpyxl`.
-   - Best long-term direction.
-3. Use LibreOffice headless in Docker for recalculation.
-   - Cross-platform, but must validate formatting/calculation accuracy.
-4. Move valuation math into Python and generate Excel only as an output artifact.
-   - Most robust long-term, but requires formalizing all formulas.
+The Python backend writes `*.xls.realtify.json` next to the generated workbook. Word generation and validation read summaries and adjustment rows from that sidecar first, which avoids any server dependency on Excel recalculation.
 
-Recommended path:
+Remaining long-term options:
 
-Start web architecture now, but keep production Windows `.exe` until Excel COM is removed or isolated.
+1. Convert `.xls` templates to `.xlsx` and maintain them with `openpyxl`.
+2. Move all valuation formulas into Python and generate Excel only as an audit artifact.
+3. Keep Windows COM as an optional compatibility backend for appraiser desktops.
 
 ## Web MVP Phases
 

@@ -4,17 +4,34 @@ import re
 from pathlib import Path
 from typing import Any
 
+from realtify.excel_sidecar import sidecar_summary_values
 from realtify.excel_tools import ExcelApp, excel_path
 
 
 def read_excel_report_values(path: Path | None) -> dict[str, Any]:
     if not path:
         return {}
+    sidecar_values = sidecar_summary_values(path)
+    if sidecar_values:
+        rounded = _round_money(sidecar_values.get("market_value_uah_rounded") or sidecar_values.get("market_value_uah"))
+        values = dict(sidecar_values)
+        values["market_value_uah_rounded"] = rounded
+        values["market_value_uah_words"] = number_to_ukrainian_words(int(rounded)) if rounded is not None else None
+        return values
     workbook_path = path.resolve()
     if not workbook_path.exists():
         return {}
 
-    with ExcelApp(visible=False) as excel:
+    try:
+        excel_context = ExcelApp(visible=False)
+    except RuntimeError:
+        return {}
+
+    try:
+        excel = excel_context.__enter__()
+    except RuntimeError:
+        return {}
+    try:
         wb = excel.Workbooks.Open(excel_path(workbook_path), 0, True)
         try:
             ws = _calculation_sheet(wb)
@@ -40,6 +57,8 @@ def read_excel_report_values(path: Path | None) -> dict[str, Any]:
             }
         finally:
             wb.Close(False)
+    finally:
+        excel_context.__exit__(None, None, None)
 
 
 def _calculation_sheet(wb: Any) -> Any:

@@ -12,6 +12,13 @@ target:
   building_class: "Комфорт"
   condition: "від забудовника"
   delivery_date: "введений"
+  # valuation_date is optional. If omitted, the report uses the current date.
+  # valuation_date: "2026-06-15"
+  # valuation_date_source:
+  #   type: "excel_cell"
+  #   path: "template"
+  #   sheet: "Sheet1"
+  #   cell: "B2"
 
 documents:
   mode: "bundle_or_separate"

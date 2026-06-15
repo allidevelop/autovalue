@@ -4,6 +4,15 @@ from pathlib import Path
 from typing import Any
 
 
+def excel_com_available() -> bool:
+    try:
+        import pythoncom  # noqa: F401
+        import win32com.client  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
 class ExcelApp:
     def __init__(self, *, visible: bool = False) -> None:
         self.visible = visible

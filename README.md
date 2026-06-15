@@ -86,7 +86,13 @@ To fill an Excel valuation template from collected candidates:
   --candidates outputs\<run_folder>\candidates.json
 ```
 
-By default the script requires 5 complete analogs. It creates a copy of the source `.xls` in `outputs/<timestamp>_excel/` and writes only cells declared in `config/template_profiles/*.yaml`.
+By default the script requires 5 complete analogs. It creates a copy of the source `.xls` in `outputs/<timestamp>_excel/` and writes only cells declared in `config/template_profiles/*.yaml`. The default backend is `auto`: it uses Microsoft Excel COM when available and falls back to the cross-platform Python `.xls` backend otherwise. To force the cross-platform backend:
+
+```powershell
+$env:REALTIFY_EXCEL_ENGINE='python-xls'
+```
+
+The Python backend writes a sidecar file next to the workbook: `*.xls.realtify.json`. Word generation and validation read calculation summaries and adjustment rows from that sidecar first, so server runs do not need Microsoft Excel.
 
 To run the full links-to-Excel workflow:
 
@@ -211,7 +217,13 @@ To launch the FastAPI web preview:
 
 Then open `http://127.0.0.1:8765`. The web UI accepts a PDF bundle, Excel template, optional Word template, optional link list, object type, and page range. It runs the batch workflow in a background thread, shows timestamped progress events, and publishes a review zip when the job finishes.
 
-Important: full report generation still requires Microsoft Excel COM. On Linux servers the web app can run as a preview and accept uploads, but calculation jobs will fail at the Excel stage until the Excel layer is moved to a Windows worker or replaced with a cross-platform implementation.
+The web app can now run report generation on Linux when the uploaded Excel template is legacy `.xls`. Microsoft Excel COM remains supported on Windows, but is no longer required for the server path.
+
+Valuation date source is resolved in this order:
+
+1. `task.valuation_date` or `target.valuation_date`.
+2. Optional Excel source config, for example `valuation_date_source: {type: excel_cell, path: template, sheet: Sheet1, cell: B2}`.
+3. Current date.
 
 To build the Windows `.exe` package:
 

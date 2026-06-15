@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from realtify.batch_workflow import BatchWorkflowResult, run_batch_workflow
+from realtify.excel_tools import excel_com_available
 from realtify.paths import PROJECT_ROOT
 
 
@@ -67,7 +68,9 @@ def health() -> dict[str, Any]:
         "ok": True,
         "project_root": str(PROJECT_ROOT),
         "web_runs_root": str(WEB_RUNS_ROOT),
-        "excel_com_available": _excel_com_available(),
+        "excel_com_available": excel_com_available(),
+        "python_xls_backend_available": _python_xls_backend_available(),
+        "calculation_available": excel_com_available() or _python_xls_backend_available(),
         "platform": os.name,
         "default_word_template_exists": DEFAULT_WORD_TEMPLATE.exists(),
     }
@@ -202,8 +205,8 @@ def _run_job(
     _append_event(job_id, f"Profile: {profile}; required analogs: {required_count}")
     if first_page or last_page:
         _append_event(job_id, f"Ограничение страниц PDF: {first_page or 1}-{last_page or 'end'}")
-    if not _excel_com_available():
-        _append_event(job_id, "Внимание: Excel COM недоступен на этой машине. Генерация Excel/Word может завершиться ошибкой.")
+    if not excel_com_available():
+        _append_event(job_id, "Excel COM недоступен; используется кроссплатформенный Python XLS backend.")
 
     try:
         result = run_batch_workflow(
@@ -289,12 +292,11 @@ def _object_label(index: int, apartment: str | None, page: int | None) -> str:
     return f"apt_{slug}" if apartment else slug
 
 
-def _excel_com_available() -> bool:
-    if os.name != "nt":
-        return False
+def _python_xls_backend_available() -> bool:
     try:
-        import pythoncom  # noqa: F401
-        import win32com.client  # noqa: F401
+        import xlrd  # noqa: F401
+        import xlutils.copy  # noqa: F401
+        import xlwt  # noqa: F401
     except Exception:
         return False
     return True
@@ -370,4 +372,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
