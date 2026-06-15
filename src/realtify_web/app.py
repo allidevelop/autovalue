@@ -280,6 +280,7 @@ def _run_job(
     _append_event(job_id, f"Excel template: {excel_path.name}")
     _append_event(job_id, f"Word template: {word_path.name}")
     _append_event(job_id, f"Profile: {profile}; required analogs: {required_count}")
+    _append_event(job_id, f"PDF render DPI: {_web_pdf_dpi()}")
     if first_page or last_page:
         _append_event(job_id, f"Ограничение страниц PDF: {first_page or 1}-{last_page or 'end'}")
     if not excel_com_available():
@@ -298,6 +299,7 @@ def _run_job(
             allow_incomplete=False,
             first_page=first_page,
             last_page=last_page,
+            dpi=_web_pdf_dpi(),
             visible=False,
             report_template_path=word_path,
             include_full_screenshots=include_full_screenshots,
@@ -377,6 +379,18 @@ def _python_xls_backend_available() -> bool:
     except Exception:
         return False
     return True
+
+
+def _web_pdf_dpi() -> int:
+    raw_value = os.getenv("REALTIFY_WEB_PDF_DPI")
+    if raw_value:
+        try:
+            value = int(raw_value)
+            if 50 <= value <= 300:
+                return value
+        except ValueError:
+            pass
+    return 110
 
 
 def _auth_credentials() -> tuple[str, str] | None:
