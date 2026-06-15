@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from pypdf import PdfReader
 from rich.console import Console
 
-from realtify.ocr import ocr_image
+from realtify.ocr import OcrTimeoutError, ocr_image
 from realtify.paths import PROJECT_ROOT, ensure_output_dir
 from realtify.pdf_tools import render_pdf_pages
 from realtify.progress import ProgressCallback, emit_progress
@@ -317,7 +317,11 @@ def _extract_or_ocr_pdf(
         if not text:
             emit_progress(progress, f"PDF intake: page {page}/{end} OCR rendering.")
             images = render_pdf_pages(pdf_path, image_dir, first_page=page, last_page=page, dpi=dpi)
-            text = ocr_image(images[0])
+            try:
+                text = ocr_image(images[0])
+            except OcrTimeoutError as exc:
+                emit_progress(progress, f"PDF intake: page {page}/{end} OCR timeout, page skipped: {exc}")
+                text = ""
         else:
             emit_progress(progress, f"PDF intake: page {page}/{end} using embedded text.")
         txt_path.write_text(text, encoding="utf-8")
