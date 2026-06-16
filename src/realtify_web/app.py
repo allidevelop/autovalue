@@ -6,6 +6,7 @@ import binascii
 import hashlib
 import hmac
 import html
+import json
 import os
 import re
 import secrets
@@ -235,6 +236,76 @@ async def create_job(
     )
     thread.start()
     return _job_payload(job_id)
+
+
+@app.post("/api/library/import")
+async def import_library_job(library_file: UploadFile = File(...)) -> dict[str, Any]:
+    job_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_lib_" + uuid4().hex[:6]
+    job_dir = WEB_RUNS_ROOT / job_id
+    input_dir = job_dir / "input"
+    output_dir = job_dir / "output"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    file_path = input_dir / _safe_upload_name(library_file.filename, "library.csv")
+    await _save_upload(library_file, file_path)
+
+    job = WebJob(
+        id=job_id,
+        status="queued",
+        created_at=_now_iso(),
+        input_dir=input_dir,
+        output_dir=output_dir,
+        runtime_log=job_dir / "runtime.log",
+    )
+    with JOBS_LOCK:
+        JOBS[job_id] = job
+    _append_event(job_id, "Імпорт бібліотеки аналогів: файл збережено.")
+    thread = threading.Thread(
+        target=_run_import_job, args=(job_id, file_path), daemon=True, name=f"realtify-lib-{job_id}"
+    )
+    thread.start()
+    return _job_payload(job_id)
+
+
+def _run_import_job(job_id: str, file_path: Path) -> None:
+    from realtify.analog_library import import_library, parse_library_file
+
+    _set_job(job_id, status="running", started_at=_now_iso())
+    try:
+        entries = parse_library_file(file_path)
+        _append_event(job_id, f"Імпорт бібліотеки: адрес у файлі — {len(entries)}.")
+        if not entries:
+            _append_event(job_id, "Помилка: у файлі немає валідних рядків address + url.")
+            _set_job(
+                job_id,
+                status="failed",
+                finished_at=_now_iso(),
+                error="У файлі не знайдено рядків address + url.",
+            )
+            _notify_job_finished(job_id)
+            return
+        report = import_library(
+            entries,
+            output_dir=_get_job(job_id).output_dir,
+            progress=lambda message: _append_event(job_id, message),
+        )
+        report_path = _get_job(job_id).output_dir / "library_import_report.json"
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        artifacts = [
+            WebArtifact(name="library_import_report.json", path=report_path, kind="report")
+        ]
+        _set_job(job_id, status="passed", finished_at=_now_iso(), artifacts=artifacts)
+        _append_event(
+            job_id,
+            f"Готово: збережено {report['saved_addresses']}/{report['addresses']} адрес, "
+            f"{report['saved_analogs']} аналогів у бібліотеку.",
+        )
+        _notify_job_finished(job_id)
+    except Exception as exc:  # noqa: BLE001 - web job must capture the full failure for the UI.
+        _append_event(job_id, f"Помилка імпорту: {exc}")
+        _append_event(job_id, traceback.format_exc())
+        _set_job(job_id, status="failed", finished_at=_now_iso(), error=str(exc))
+        _notify_job_finished(job_id)
 
 
 @app.get("/api/jobs")
