@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from realtify.batch_workflow import BatchWorkflowResult, run_batch_workflow
-from realtify.excel_tools import excel_com_available
+from realtify.excel_tools import excel_com_available, libreoffice_available
 from realtify.paths import PROJECT_ROOT
 
 
@@ -147,8 +147,9 @@ def health() -> dict[str, Any]:
         "project_root": str(PROJECT_ROOT),
         "web_runs_root": str(WEB_RUNS_ROOT),
         "excel_com_available": excel_com_available(),
+        "libreoffice_backend_available": libreoffice_available(),
         "python_xls_backend_available": _python_xls_backend_available(),
-        "calculation_available": excel_com_available() or _python_xls_backend_available(),
+        "calculation_available": excel_com_available() or libreoffice_available() or _python_xls_backend_available(),
         "platform": os.name,
         "default_word_template_exists": DEFAULT_WORD_TEMPLATE.exists(),
     }
@@ -286,7 +287,10 @@ def _run_job(
     if first_page or last_page:
         _append_event(job_id, f"Ограничение страниц PDF: {first_page or 1}-{last_page or 'end'}")
     if not excel_com_available():
-        _append_event(job_id, "Excel COM недоступен; используется кроссплатформенный Python XLS backend.")
+        if libreoffice_available():
+            _append_event(job_id, "Excel COM недоступен; используется формуло-безопасный LibreOffice backend.")
+        else:
+            _append_event(job_id, "Excel COM и LibreOffice недоступны; используется аварийный Python XLS backend, который может заменить формулы значениями.")
 
     try:
         result = run_batch_workflow(

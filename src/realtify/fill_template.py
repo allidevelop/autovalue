@@ -5,6 +5,8 @@ import json
 import os
 import re
 import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,7 +17,7 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 
 from realtify.excel_sidecar import build_calculation_sidecar_payload, write_excel_sidecar
-from realtify.excel_tools import ExcelApp, excel_com_available, excel_path
+from realtify.excel_tools import ExcelApp, excel_com_available, excel_path, libreoffice_available, libreoffice_path
 from realtify.models import Comparable
 from realtify.paths import PROJECT_ROOT, RESOURCE_ROOT, ensure_output_dir
 
@@ -100,6 +102,17 @@ def fill_excel_template(
             selected=selected,
             target=target,
         )
+        warnings.append(
+            "python_xls_backend_flattens_excel_formulas; use Microsoft Excel COM or LibreOffice for formula-safe workbooks"
+        )
+    elif backend == "libreoffice":
+        metadata_path = _fill_with_libreoffice(
+            template_path=template_path,
+            output_path=output_path,
+            profile=profile,
+            selected=selected,
+            target=target,
+        )
     else:
         raise FillError(f"Unsupported Excel backend: {backend}")
 
@@ -132,6 +145,72 @@ def _fill_with_excel_com(
         finally:
             wb.Close(True)
     return None
+
+
+def _fill_with_libreoffice(
+    *,
+    template_path: Path,
+    output_path: Path,
+    profile: TemplateProfile,
+    selected: list[Comparable],
+    target: dict[str, Any] | None,
+) -> Path | None:
+    soffice = libreoffice_path()
+    if not soffice:
+        raise FillError("LibreOffice/soffice is unavailable.")
+    if template_path.suffix.lower() not in {".xls", ".xlsx", ".xlsm"}:
+        raise FillError("LibreOffice backend supports .xls, .xlsx, and .xlsm templates.")
+
+    try:
+        import openpyxl
+    except Exception as exc:
+        raise FillError(f"openpyxl is unavailable for LibreOffice backend: {exc}") from exc
+
+    with tempfile.TemporaryDirectory(prefix="realtify_excel_") as tmp_name:
+        tmp_dir = Path(tmp_name)
+        office_profile = tmp_dir / "lo_profile"
+        office_profile.mkdir(parents=True, exist_ok=True)
+        source_for_edit = _prepare_xlsx_for_edit(
+            soffice=soffice,
+            office_profile=office_profile,
+            template_path=template_path,
+            tmp_dir=tmp_dir,
+        )
+        edited_xlsx = tmp_dir / "edited.xlsx"
+        shutil.copy2(source_for_edit, edited_xlsx)
+
+        workbook = openpyxl.load_workbook(edited_xlsx, keep_vba=template_path.suffix.lower() == ".xlsm", data_only=False)
+        try:
+            worksheet = _find_openpyxl_sheet(workbook, profile.sheet_name)
+            template_rows = _read_template_rows_openpyxl(worksheet, start=15, end=43)
+            protected = _protected_cells(profile)
+            _fill_comparables_openpyxl(worksheet, profile, selected, protected)
+            if target:
+                _fill_target_openpyxl(worksheet, profile, target, protected)
+            workbook.save(edited_xlsx)
+        finally:
+            workbook.close()
+
+        if output_path.suffix.lower() in {".xlsx", ".xlsm"}:
+            shutil.copy2(edited_xlsx, output_path)
+        else:
+            converted = _convert_with_libreoffice(
+                soffice=soffice,
+                office_profile=office_profile,
+                input_path=edited_xlsx,
+                out_dir=tmp_dir / "final",
+                target_format="xls",
+            )
+            shutil.copy2(converted, output_path)
+    payload = build_calculation_sidecar_payload(
+        excel_path=output_path,
+        engine="libreoffice",
+        profile_name=profile.profile,
+        candidates=selected,
+        target=target,
+        template_rows=template_rows,
+    )
+    return write_excel_sidecar(output_path, payload)
 
 
 def _fill_with_python_xls(
@@ -174,7 +253,6 @@ def _fill_with_python_xls(
         target=target,
         template_rows=template_rows,
     )
-    _write_calculated_values_xls(output_sheet, payload)
     output_book.save(str(output_path))
     return write_excel_sidecar(output_path, payload)
 
@@ -211,21 +289,24 @@ def _select_excel_backend(*, template_path: Path) -> str:
     aliases = {
         "win32": "com",
         "excel": "com",
+        "lo": "libreoffice",
+        "soffice": "libreoffice",
         "python": "python-xls",
         "xls": "python-xls",
     }
     requested = aliases.get(requested, requested)
-    if requested in {"com", "python-xls"}:
+    if requested in {"com", "libreoffice", "python-xls"}:
         return requested
     if requested != "auto":
         raise FillError(f"Unsupported REALTIFY_EXCEL_ENGINE value: {requested}")
     if excel_com_available():
         return "com"
+    if libreoffice_available():
+        return "libreoffice"
     if template_path.suffix.lower() == ".xls":
         return "python-xls"
     raise FillError(
-        "No Excel backend is available. Install Microsoft Excel on Windows, "
-        "or use an .xls template with the cross-platform Python backend."
+        "No Excel backend is available. Install Microsoft Excel on Windows or LibreOffice/soffice on Linux."
     )
 
 
@@ -287,18 +368,39 @@ def _fill_target_xls(ws: Any, profile: TemplateProfile, target: dict[str, Any], 
         _write_xls_cell(ws, row, col_num, _target_value(target, field))
 
 
-def _write_calculated_values_xls(ws: Any, payload: dict[str, Any]) -> None:
-    raw_rows = payload.get("raw_adjustment_rows") or {}
-    for row_key, row_values in raw_rows.items():
-        row_index = int(row_key)
-        if not isinstance(row_values, list):
-            continue
-        for col_index, value in enumerate(row_values[:8], start=1):
-            _write_xls_cell(ws, row_index, col_index, value)
+def _fill_comparables_openpyxl(
+    ws: Any,
+    profile: TemplateProfile,
+    candidates: list[Comparable],
+    protected: set[tuple[int, int]],
+) -> None:
+    for col_index, column in enumerate(profile.comparables_columns):
+        col_num = _column_to_number(column)
+        candidate = candidates[col_index] if col_index < len(candidates) else None
+        for field, row in profile.field_mapping.items():
+            if (row, col_num) in protected:
+                continue
+            value = _candidate_value(candidate, field) if candidate else None
+            _write_openpyxl_cell(ws.cell(row=row, column=col_num), value, hyperlink=field == "source_url")
 
-    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
-    _write_xls_cell(ws, 44, 5, summary.get("market_value_usd"))
-    _write_xls_cell(ws, 44, 6, summary.get("market_value_uah"))
+
+def _fill_target_openpyxl(ws: Any, profile: TemplateProfile, target: dict[str, Any], protected: set[tuple[int, int]]) -> None:
+    if not profile.target_column:
+        return
+    col_num = _column_to_number(profile.target_column)
+    for field, row in profile.field_mapping.items():
+        if field == "source_url" or (row, col_num) in protected:
+            continue
+        _write_openpyxl_cell(ws.cell(row=row, column=col_num), _target_value(target, field))
+
+
+def _write_openpyxl_cell(cell: Any, value: Any, *, hyperlink: bool = False) -> None:
+    cell.value = "" if value is None else value
+    if hyperlink and value:
+        cell.hyperlink = str(value)
+        cell.style = "Hyperlink"
+    elif hyperlink:
+        cell.hyperlink = None
 
 
 def _write_xls_cell(ws: Any, row: int, col: int, value: Any) -> None:
@@ -307,6 +409,74 @@ def _write_xls_cell(ws: Any, row: int, col: int, value: Any) -> None:
     if hasattr(value, "unicode_string"):
         value = str(value)
     ws.write(row - 1, col - 1, value)
+
+
+def _prepare_xlsx_for_edit(
+    *,
+    soffice: str,
+    office_profile: Path,
+    template_path: Path,
+    tmp_dir: Path,
+) -> Path:
+    suffix = template_path.suffix.lower()
+    if suffix in {".xlsx", ".xlsm"}:
+        target = tmp_dir / template_path.name
+        shutil.copy2(template_path, target)
+        return target
+    return _convert_with_libreoffice(
+        soffice=soffice,
+        office_profile=office_profile,
+        input_path=template_path,
+        out_dir=tmp_dir / "xlsx",
+        target_format="xlsx",
+    )
+
+
+def _convert_with_libreoffice(
+    *,
+    soffice: str,
+    office_profile: Path,
+    input_path: Path,
+    out_dir: Path,
+    target_format: str,
+) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    command = [
+        soffice,
+        "--headless",
+        "--nologo",
+        "--nofirststartwizard",
+        "--nolockcheck",
+        f"-env:UserInstallation={office_profile.as_uri()}",
+        "--convert-to",
+        target_format,
+        "--outdir",
+        str(out_dir),
+        str(input_path.resolve()),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        details = "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part)
+        raise FillError(f"LibreOffice conversion to {target_format} failed: {details}")
+    suffix = "." + target_format.split(":", 1)[0].lower()
+    matches = sorted(out_dir.glob(f"*{suffix}"), key=lambda path: path.stat().st_mtime, reverse=True)
+    if not matches:
+        details = "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part)
+        raise FillError(f"LibreOffice did not create a {suffix} file. {details}")
+    return matches[0]
+
+
+def _find_openpyxl_sheet(workbook: Any, preferred_name: str) -> Any:
+    if preferred_name in workbook.sheetnames:
+        return workbook[preferred_name]
+    preferred = preferred_name.casefold()
+    for name in workbook.sheetnames:
+        if preferred and preferred in name.casefold():
+            return workbook[name]
+    for worksheet in workbook.worksheets:
+        if worksheet.max_row >= 44 and worksheet.max_column >= 8:
+            return worksheet
+    return workbook.worksheets[0]
 
 
 def _find_xlrd_sheet_index(book: Any, preferred_name: str) -> int:
@@ -330,6 +500,16 @@ def _read_template_rows(sheet: Any, *, start: int, end: int, date_mode: int) -> 
         row: list[Any] = []
         for col_index in range(1, 9):
             row.append(_xlrd_cell_value(sheet, row_index, col_index, date_mode=date_mode))
+        rows[row_index] = row
+    return rows
+
+
+def _read_template_rows_openpyxl(sheet: Any, *, start: int, end: int) -> dict[int, list[Any]]:
+    rows: dict[int, list[Any]] = {}
+    for row_index in range(start, end + 1):
+        row: list[Any] = []
+        for col_index in range(1, 9):
+            row.append(sheet.cell(row=row_index, column=col_index).value or "")
         rows[row_index] = row
     return rows
 

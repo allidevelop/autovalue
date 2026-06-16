@@ -76,7 +76,7 @@ To discover listing links automatically from configured source catalogs:
 
 Discovery writes `discovered_links.txt` and `discovery.json`. For apartments with `collection.only_newbuilds: true`, Rieltor discovery uses the `/newhouse/` catalog. Direct `--links` files still work and override automatic discovery.
 
-After collection, the workflow ranks candidates before Excel/Word generation. The full parsed pool is saved as `collected_candidates.json`; the final selected analogs are saved as `candidates.json`; selection scores and rejection reasons are saved as `candidate_selection.json` and `candidate_selection.md`.
+After collection, the workflow ranks candidates before Excel/Word generation. For apartments and parking, analogs from the same complex or the same address/building are prioritized over looser matches; selected analogs are also diversified across sources when possible. The full parsed pool is saved as `collected_candidates.json`; the final selected analogs are saved as `candidates.json`; selection scores and rejection reasons are saved as `candidate_selection.json` and `candidate_selection.md`.
 
 To fill an Excel valuation template from collected candidates:
 
@@ -86,13 +86,15 @@ To fill an Excel valuation template from collected candidates:
   --candidates outputs\<run_folder>\candidates.json
 ```
 
-By default the script requires 5 complete analogs. It creates a copy of the source `.xls` in `outputs/<timestamp>_excel/` and writes only cells declared in `config/template_profiles/*.yaml`. The default backend is `auto`: it uses Microsoft Excel COM when available and falls back to the cross-platform Python `.xls` backend otherwise. To force the cross-platform backend:
+By default the script requires 5 complete analogs. It creates a copy of the source `.xls` in `outputs/<timestamp>_excel/` and writes only cells declared in `config/template_profiles/*.yaml`. The default backend is `auto`: it uses Microsoft Excel COM when available, then LibreOffice/soffice, and only then the emergency Python `.xls` backend. To force a backend:
 
 ```powershell
+$env:REALTIFY_EXCEL_ENGINE='com'          # Windows + Microsoft Excel, formula-safe
+$env:REALTIFY_EXCEL_ENGINE='libreoffice'  # Linux/server with LibreOffice, formula-safe
 $env:REALTIFY_EXCEL_ENGINE='python-xls'
 ```
 
-The Python backend writes a sidecar file next to the workbook: `*.xls.realtify.json`. Word generation and validation read calculation summaries and adjustment rows from that sidecar first, so server runs do not need Microsoft Excel.
+`python-xls` writes only declared input cells but can flatten existing `.xls` formulas into static values. Use it only for emergency report generation where the sidecar calculation is acceptable and the Excel workbook itself is not the audited calculation artifact. COM and LibreOffice are the formula-safe backends. The Python/LibreOffice server path also writes a sidecar file next to the workbook: `*.xls.realtify.json`. Word generation and validation read calculation summaries and adjustment rows from that sidecar first.
 
 To run the full links-to-Excel workflow:
 

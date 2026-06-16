@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,14 @@ def excel_com_available() -> bool:
     except Exception:
         return False
     return True
+
+
+def libreoffice_path() -> str | None:
+    return shutil.which("soffice") or shutil.which("libreoffice")
+
+
+def libreoffice_available() -> bool:
+    return libreoffice_path() is not None
 
 
 class ExcelApp:

@@ -72,8 +72,9 @@ def select_candidates(
             scored.append((record.score, index, candidate, record))
 
     scored.sort(key=lambda item: (item[0], item[1]))
+    ranked = _rank_for_selection(scored, required_count=required_count, cfg=cfg)
     selected_candidates: list[Comparable] = []
-    for rank, (_score, _index, candidate, record) in enumerate(scored[:required_count], start=1):
+    for rank, (_score, _index, candidate, record) in enumerate(ranked, start=1):
         record.selected = True
         record.selected_rank = rank
         selected_candidates.append(candidate)
@@ -85,6 +86,14 @@ def select_candidates(
         warnings.append("no_candidates_collected")
     if cfg.get("only_newbuilds") and not cfg.get("require_newbuild_signal"):
         warnings.append("newbuild_filter_assumed_from_discovery_or_source_configuration")
+    if cfg.get("prefer_same_complex_or_address"):
+        same_count = sum(1 for _score, _index, _candidate, record in scored if record.metrics.get("same_complex_or_address") is True)
+        if same_count < required_count:
+            warnings.append(f"same_complex_or_address_candidates_{same_count}_of_required_{required_count}")
+    if cfg.get("prefer_source_diversity") and len(selected_candidates) > 1:
+        source_count = len({candidate.source_key or str(candidate.source_url) for candidate in selected_candidates})
+        if source_count < min(len(selected_candidates), required_count):
+            warnings.append(f"selected_sources_{source_count}_of_{len(selected_candidates)}")
 
     return CandidateSelectionResult(
         required_count=required_count,
@@ -149,6 +158,16 @@ def _score_candidate(
     if cfg["require_city_match"] and city_match is False:
         record.rejection_reasons.append("city_mismatch")
 
+    same_complex_or_address = _same_complex_or_address(target, candidate)
+    record.metrics["same_complex_or_address"] = same_complex_or_address
+    if cfg["prefer_same_complex_or_address"]:
+        if same_complex_or_address is True:
+            score -= 30.0
+            record.score_reasons.append("same_complex_or_address")
+        elif same_complex_or_address is False:
+            score += cfg["off_address_penalty"]
+            record.score_reasons.append(f"off_address_penalty={cfg['off_address_penalty']:.0f}")
+
     area_delta_pct = _area_delta_pct(target.get("area_m2"), candidate.area_m2)
     record.metrics["area_delta_pct"] = area_delta_pct
     if area_delta_pct is not None:
@@ -208,6 +227,7 @@ def _selection_config(collection_config: dict[str, Any], target: dict[str, Any])
         raise SelectionError("collection.selection must be a YAML object")
     property_type = str(target.get("property_type") or "")
     default_max_area_delta = 75.0 if property_type in {"parking", "commercial", "office", "retail", "warehouse", "house", "land"} else 50.0
+    default_same_address = property_type in {"apartment", "parking"}
     return {
         "enabled": _optional_bool(raw.get("enabled"), default=True),
         "require_address": _optional_bool(raw.get("require_address"), default=True),
@@ -218,9 +238,70 @@ def _selection_config(collection_config: dict[str, Any], target: dict[str, Any])
         "strict_same_rooms": _optional_bool(raw.get("strict_same_rooms"), default=False),
         "only_newbuilds": _optional_bool(collection_config.get("only_newbuilds"), default=False),
         "require_newbuild_signal": _optional_bool(raw.get("require_newbuild_signal"), default=False),
+        "prefer_same_complex_or_address": _optional_bool(raw.get("prefer_same_complex_or_address"), default=default_same_address),
+        "off_address_penalty": _optional_float(raw.get("off_address_penalty"), default=250.0),
+        "prefer_source_diversity": _optional_bool(raw.get("prefer_source_diversity"), default=True),
         "preferred_area_delta_pct": _optional_float(raw.get("preferred_area_delta_pct"), default=35.0),
         "max_area_delta_pct": _optional_float(raw.get("max_area_delta_pct"), default=default_max_area_delta),
     }
+
+
+def _rank_for_selection(
+    scored: list[tuple[float, int, Comparable, CandidateSelectionRecord]],
+    *,
+    required_count: int,
+    cfg: dict[str, Any],
+) -> list[tuple[float, int, Comparable, CandidateSelectionRecord]]:
+    if not scored:
+        return []
+    if cfg.get("prefer_same_complex_or_address"):
+        same = [item for item in scored if item[3].metrics.get("same_complex_or_address") is True]
+        other = [item for item in scored if item[3].metrics.get("same_complex_or_address") is not True]
+        if same:
+            selected = _pick_with_source_diversity(same, required_count, enabled=cfg.get("prefer_source_diversity", True))
+            if len(selected) < required_count:
+                selected.extend(
+                    _pick_with_source_diversity(
+                        other,
+                        required_count - len(selected),
+                        enabled=cfg.get("prefer_source_diversity", True),
+                    )
+                )
+            return selected[:required_count]
+    return _pick_with_source_diversity(scored, required_count, enabled=cfg.get("prefer_source_diversity", True))
+
+
+def _pick_with_source_diversity(
+    scored: list[tuple[float, int, Comparable, CandidateSelectionRecord]],
+    limit: int,
+    *,
+    enabled: bool,
+) -> list[tuple[float, int, Comparable, CandidateSelectionRecord]]:
+    if limit <= 0 or not scored:
+        return []
+    if not enabled:
+        return scored[:limit]
+    selected: list[tuple[float, int, Comparable, CandidateSelectionRecord]] = []
+    selected_indexes: set[int] = set()
+    used_sources: set[str] = set()
+    for item in scored:
+        _score, original_index, candidate, _record = item
+        source = candidate.source_key or str(candidate.source_url)
+        if source in used_sources:
+            continue
+        selected.append(item)
+        selected_indexes.add(original_index)
+        used_sources.add(source)
+        if len(selected) >= limit:
+            return selected
+    for item in scored:
+        _score, original_index, _candidate, _record = item
+        if original_index in selected_indexes:
+            continue
+        selected.append(item)
+        if len(selected) >= limit:
+            return selected
+    return selected
 
 
 def _disabled_selection(candidates: list[Comparable], required_count: int) -> CandidateSelectionResult:
@@ -305,6 +386,55 @@ def _complex_score(target_complex: Any, candidate: Comparable) -> float:
     if target and (target in candidate_complex or candidate_complex in target):
         return -6.0
     return 0.0
+
+
+def _same_complex_or_address(target: dict[str, Any], candidate: Comparable) -> bool | None:
+    target_complex = _normalize_text(str(target.get("complex_name") or ""))
+    candidate_probe = _normalize_text(
+        " ".join(str(value or "") for value in [candidate.complex_name, candidate.address, candidate.title])
+    )
+    if target_complex and candidate_probe:
+        if target_complex in candidate_probe or candidate_probe in target_complex:
+            return True
+
+    target_address = _normalize_text(str(target.get("address") or ""))
+    if not target_address or not candidate_probe:
+        return None
+    target_building = _building_number(target_address)
+    candidate_building = _building_number(candidate_probe)
+    street_tokens = _street_tokens(target_address)
+    if street_tokens and any(token in candidate_probe for token in street_tokens):
+        if target_building and candidate_building:
+            return target_building == candidate_building
+        return True
+    return False
+
+
+def _building_number(value: str) -> str | None:
+    match = re.search(r"\b(\d{1,4})\s*[- ]?\s*([a-zа-яіїєґ])?\b", value, flags=re.IGNORECASE)
+    if not match:
+        return None
+    suffix = match.group(2) or ""
+    return f"{match.group(1)}{suffix}".casefold()
+
+
+def _street_tokens(value: str) -> list[str]:
+    stop = {
+        "м",
+        "місто",
+        "київ",
+        "львів",
+        "будинок",
+        "буд",
+        "квартира",
+        "кв",
+        "вул",
+        "вулиця",
+        "просп",
+        "проспект",
+    }
+    tokens = [token for token in _normalize_text(value).split() if len(token) >= 5 and token not in stop and not token.isdigit()]
+    return tokens[:4]
 
 
 def _has_newbuild_signal(candidate: Comparable) -> bool:
