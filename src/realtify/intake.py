@@ -351,6 +351,7 @@ def _parse_extract(page: int, text: str) -> ExtractRecord | None:
     if "витяг" not in lowered or "реєстр" not in lowered or "речов" not in lowered:
         return None
     address = _extract_address(normalized)
+    address_full = _normalize_address(address)
     object_description = _line_after_label(normalized, "Опис об'єкта") or _line_after_label(normalized, "Опис об’скта")
     total_area, living_area = _parse_areas(normalized)
     owners = _block_after_label(normalized, "Власники", end_markers=["Витяг сформував", "Підпис"])
@@ -381,8 +382,8 @@ def _parse_extract(page: int, text: str) -> ExtractRecord | None:
         object_description=object_description,
         total_area_m2=total_area,
         living_area_m2=living_area,
-        address_full=_normalize_address(address),
-        city=_parse_city(address),
+        address_full=address_full,
+        city=_parse_city(address_full or normalized),
         apartment_number=_parse_apartment_number(address or normalized),
         owners_from_extract=owners,
         property_right_type=_line_after_label(normalized, "Тип речового права"),
@@ -708,10 +709,44 @@ def _tech_address_from_text(text: str) -> str | None:
 
 
 def _extract_address(text: str) -> str | None:
-    labeled = _line_after_label(text, "Адреса")
-    if _looks_like_address(labeled):
-        return labeled
+    for label in ["Адреса", "Аярес", "Адрсс", "Арес"]:
+        labeled = _line_after_label(text, label)
+        if _looks_like_full_address(labeled):
+            return labeled
+    fuzzy_labeled = _address_after_fuzzy_label(text)
+    if fuzzy_labeled:
+        return fuzzy_labeled
     return _extract_address_from_text(text)
+
+
+def _address_after_fuzzy_label(text: str) -> str | None:
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        label = _clean_line(line).casefold()
+        if not re.fullmatch(r"(?:адреса?|аярес|а.?рес)", label):
+            continue
+        parts: list[str] = []
+        for next_line in lines[index + 1 : index + 12]:
+            cleaned = _clean_line(next_line)
+            if not cleaned:
+                continue
+            lowered = cleaned.casefold()
+            if any(
+                marker in lowered
+                for marker in [
+                    "актуальна інформація",
+                    "кауальна інформація",
+                    "номер відомостей",
+                    "речове право",
+                    "власники",
+                ]
+            ):
+                break
+            parts.append(cleaned)
+            candidate = _clean_line(" ".join(parts))
+            if _looks_like_full_address(candidate):
+                return candidate
+    return None
 
 
 def _extract_address_from_text(text: str) -> str | None:
@@ -719,11 +754,13 @@ def _extract_address_from_text(text: str) -> str | None:
         r"(м\.\s*Київ[^\n\r]{0,180}(?:квартира|квертира|кнартира|квазтира|кв\.?/оф\.?)\s*\d{1,5})",
         r"(Київ[^\n\r]{0,180}(?:квартира|квертира|кнартира|квазтира|кв\.?/оф\.?)\s*\d{1,5})",
         r"((?:лов|м\.)?\s*,?\s*Д[^\n\r]{0,45}набережна[^\n\r]{0,180}(?:квартира|квертира|кнартира|квазтира|кв\.?/оф\.?)\s*\d{1,5})",
+        r"((?:м\.?\s*Київ|Київ|хо\s*він|лов)?\s*,?\s*Д[^\n\r]{0,80}набережна[^\n\r]{0,180}(?:квартира|квертира|кнартира|квазтира|кв\.?/оф\.?)\s*\d{1,5})",
     ]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return _clean_line(match.group(1))
+    for search_text in [text, re.sub(r"\s+", " ", text)]:
+        for pattern in patterns:
+            match = re.search(pattern, search_text, re.IGNORECASE)
+            if match:
+                return _clean_line(match.group(1))
     return None
 
 
@@ -739,24 +776,38 @@ def _looks_like_address(value: str | None) -> bool:
     )
 
 
+def _looks_like_full_address(value: str | None) -> bool:
+    normalized = _normalize_address(value) or value
+    if not normalized or not _looks_like_address(normalized):
+        return False
+    lowered = normalized.casefold()
+    return _parse_apartment_number(normalized) is not None or "будин" in lowered
+
+
 def _normalize_text(text: str) -> str:
     replacements = {
         "\xa0": " ",
         "  ": " ",
         "будинох": "будинок",
         "будилох": "будинок",
+        "будилок": "будинок",
         "будипск": "будинок",
         "будинск": "будинок",
         "будииок": "будинок",
         "Дпіпровська": "Дніпровська",
         "Диїпровська": "Дніпровська",
         "Дипровська": "Дніпровська",
+        "Диіпровем": "Дніпровська",
+        "Дніпровем": "Дніпровська",
         "Дийпровська": "Дніпровська",
         "Диіпрозська": "Дніпровська",
         "Днілровська": "Дніпровська",
+        "аборожно": "набережна",
         "пабережна": "набережна",
         "пабережица": "набережна",
         "набережица": "набережна",
+        "квертира": "квартира",
+        "хо він": "м.Київ",
         "заКиїв": "м.Київ",
         "Хоїв": "Київ",
         "Каїв": "Київ",
@@ -773,8 +824,11 @@ def _normalize_address(address: str | None) -> str | None:
         return None
     value = _clean_line(address)
     value = value.replace("Дийпровська", "Дніпровська")
+    value = value.replace("Диіпровем", "Дніпровська").replace("Дніпровем", "Дніпровська")
+    value = value.replace("аборожно", "набережна")
     value = value.replace("пабережна", "набережна").replace("пабережица", "набережна").replace("набережица", "набережна")
-    value = value.replace("будилох", "будинок").replace("будииок", "будинок").replace("будипск", "будинок").replace("будинск", "будинок")
+    value = value.replace("будилох", "будинок").replace("будилок", "будинок").replace("будииок", "будинок").replace("будипск", "будинок").replace("будинск", "будинок")
+    value = value.replace("хо він", "м.Київ")
     value = value.replace("заКиїв", "м.Київ")
     value = value.replace("17- | К", "17-К").replace("17- К", "17-К").replace("17-K", "17-К")
     value = value.replace("І7-К", "17-К").replace("I7-К", "17-К").replace("l7-К", "17-К")
@@ -784,6 +838,7 @@ def _normalize_address(address: str | None) -> str | None:
         value = re.sub(r"(?i)^\s*лов\s*,\s*", "м.Київ, ", value, count=1)
     if "Дніпровська набережна" in value and not _parse_city(value):
         value = f"м.Київ, {value.lstrip(' ,')}"
+    value = re.sub(r"(набережна)\s+(будинок)", r"\1, \2", value, flags=re.IGNORECASE)
     value = value.replace("інший ", "")
     value = value.replace("(місце ", "")
     value = re.sub(r"\s*,\s*", ", ", value)
