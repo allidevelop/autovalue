@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 from rich.console import Console
 
+from realtify import analog_cache
 from realtify.candidate_selector import CandidateSelectionResult, save_selection_result, select_candidates
 from realtify.collect_from_links import CollectionResult, collect_from_links, read_links, save_collection_result
 from realtify.discover_links import DiscoveryResult, discover_links_for_task, save_discovery_result
@@ -78,63 +79,112 @@ def run_excel_workflow(
     out_dir = _resolve_path(output_dir) if output_dir else _default_workflow_output_dir(target)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    links_file = links_path or _optional_path(collection_cfg.get("links_path"))
+    # ── Кеш аналогів за адресою: для повторюваних адрес пропускаємо пошук ──
+    cache_key = analog_cache.address_key(
+        city=target.get("city"),
+        address=target.get("address"),
+        property_type=str(property_type),
+        complex_name=target.get("complex_name"),
+    )
+    manual_links = links_path or _optional_path(collection_cfg.get("links_path"))
+    cached = analog_cache.lookup(cache_key, out_dir) if (cache_key and not manual_links) else None
+
+    links_file: Path | None = manual_links
     discovery: DiscoveryResult | None = None
-    if links_file:
-        links_file = _resolve_path(links_file)
-        links = read_links(links_file)
-        emit_progress(progress, f"Використовую ручний список посилань: {links_file} ({len(links)} URL).")
+    collection: CollectionResult | None = None
+    selection: CandidateSelectionResult | None = None
+
+    if cached and len(cached) >= required:
+        emit_progress(
+            progress,
+            "Кеш аналогів: адресу знайдено в базі — пропускаю пошук, "
+            f"беру {len(cached)} збережених аналогів.",
+        )
+        selected_collection = CollectionResult(
+            output_dir=out_dir,
+            candidates=cached[:required] if required else cached,
+            errors=[],
+        )
+        links_file = out_dir / "candidates.json"
+        save_collection_result(
+            selected_collection,
+            links=[str(c.source_url) for c in selected_collection.candidates],
+            candidates_filename="candidates.json",
+            report_filename="selected_candidates_report.md",
+        )
     else:
-        emit_progress(progress, "Автоматичний пошук аналогів: старт.")
-        discovery = discover_links_for_task(
-            task=task,
+        if links_file:
+            links_file = _resolve_path(links_file)
+            links = read_links(links_file)
+            emit_progress(progress, f"Використовую ручний список посилань: {links_file} ({len(links)} URL).")
+        else:
+            emit_progress(progress, "Автоматичний пошук аналогів: старт.")
+            discovery = discover_links_for_task(
+                task=task,
+                output_dir=out_dir,
+                sources_config=sources_config,
+                required_count=required,
+                max_links=_optional_int(collection_cfg.get("max_discovered_links")),
+                pages_per_source=_optional_int(collection_cfg.get("discovery_pages")),
+                progress=progress,
+            )
+            links_file = save_discovery_result(discovery)
+            links = [str(link.url) for link in discovery.links]
+            emit_progress(progress, f"Автоматичний пошук аналогів: збережено {len(links)} URL у {links_file.name}.")
+
+        emit_progress(progress, "Збір даних та full-page screenshots по знайдених оголошеннях: старт.")
+        collection = collect_from_links(
+            links,
             output_dir=out_dir,
             sources_config=sources_config,
-            required_count=required,
-            max_links=_optional_int(collection_cfg.get("max_discovered_links")),
-            pages_per_source=_optional_int(collection_cfg.get("discovery_pages")),
+            property_type=property_type,
+            transaction_type=transaction_type,
             progress=progress,
         )
-        links_file = save_discovery_result(discovery)
-        links = [str(link.url) for link in discovery.links]
-        emit_progress(progress, f"Автоматичний пошук аналогів: збережено {len(links)} URL у {links_file.name}.")
-
-    emit_progress(progress, "Збір даних та full-page screenshots по знайдених оголошеннях: старт.")
-    collection = collect_from_links(
-        links,
-        output_dir=out_dir,
-        sources_config=sources_config,
-        property_type=property_type,
-        transaction_type=transaction_type,
-        progress=progress,
-    )
-    save_collection_result(
-        collection,
-        links=links,
-        candidates_filename="collected_candidates.json",
-        report_filename="collection_report.md",
-    )
-    emit_progress(progress, f"Сирий пул аналогів збережено: {len(collection.candidates)} кандидатів, {len(collection.errors)} помилок.")
-    emit_progress(progress, "Відбір 5 найкращих аналогів: старт.")
-    selection = select_candidates(
-        collection.candidates,
-        target=target,
-        collection_config=collection_cfg,
-        required_count=required,
-    )
-    save_selection_result(selection, out_dir)
-    emit_progress(progress, f"Відбір завершено: обрано {len(selection.selected_candidates)} з {len(collection.candidates)} кандидатів.")
-    selected_collection = CollectionResult(
-        output_dir=out_dir,
-        candidates=selection.selected_candidates,
-        errors=collection.errors,
-    )
-    save_collection_result(
-        selected_collection,
-        links=[str(candidate.source_url) for candidate in selection.selected_candidates],
-        candidates_filename="candidates.json",
-        report_filename="selected_candidates_report.md",
-    )
+        save_collection_result(
+            collection,
+            links=links,
+            candidates_filename="collected_candidates.json",
+            report_filename="collection_report.md",
+        )
+        emit_progress(progress, f"Сирий пул аналогів збережено: {len(collection.candidates)} кандидатів, {len(collection.errors)} помилок.")
+        emit_progress(progress, "Відбір 5 найкращих аналогів: старт.")
+        selection = select_candidates(
+            collection.candidates,
+            target=target,
+            collection_config=collection_cfg,
+            required_count=required,
+        )
+        save_selection_result(selection, out_dir)
+        emit_progress(progress, f"Відбір завершено: обрано {len(selection.selected_candidates)} з {len(collection.candidates)} кандидатів.")
+        selected_collection = CollectionResult(
+            output_dir=out_dir,
+            candidates=selection.selected_candidates,
+            errors=collection.errors,
+        )
+        save_collection_result(
+            selected_collection,
+            links=[str(candidate.source_url) for candidate in selection.selected_candidates],
+            candidates_filename="candidates.json",
+            report_filename="selected_candidates_report.md",
+        )
+        # Зберігаємо підібрані аналоги в кеш для повторного використання по цій адресі.
+        if cache_key and selected_collection.candidates:
+            try:
+                analog_cache.save(
+                    cache_key,
+                    city=target.get("city"),
+                    address=target.get("address"),
+                    property_type=str(property_type),
+                    complex_name=target.get("complex_name"),
+                    candidates=selected_collection.candidates,
+                )
+                emit_progress(
+                    progress,
+                    f"Кеш аналогів: збережено {len(selected_collection.candidates)} аналогів для адреси.",
+                )
+            except Exception as exc:  # noqa: BLE001 — кеш не повинен валити основний потік
+                emit_progress(progress, f"Кеш аналогів: не вдалося зберегти ({exc}).")
 
     excel_result: FillResult | None = None
     fill_error: str | None = None

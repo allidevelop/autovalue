@@ -30,3 +30,6 @@ client_test_files/*
 
 # Keep application templates under version control.
 !config/report_templates/*.docx
+
+# analog cache (sqlite + screenshots)
+data/
