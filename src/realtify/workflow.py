@@ -168,8 +168,19 @@ def run_excel_workflow(
             candidates_filename="candidates.json",
             report_filename="selected_candidates_report.md",
         )
-        # Зберігаємо підібрані аналоги в кеш для повторного використання по цій адресі.
-        if cache_key and selected_collection.candidates:
+        # Кешуємо підібрані аналоги ТІЛЬКИ якщо вони достовірні: того ж ЖК/будинку
+        # або задані вручну. Інакше не розмножуємо city-wide «сміття» по кешу.
+        selected_same = (
+            sum(
+                1
+                for rec in selection.records
+                if rec.selected and rec.metrics.get("same_complex_or_address") is True
+            )
+            if selection
+            else 0
+        )
+        cache_trustworthy = bool(manual_links) or selected_same >= 1
+        if cache_key and selected_collection.candidates and cache_trustworthy:
             try:
                 analog_cache.save(
                     cache_key,
@@ -185,6 +196,12 @@ def run_excel_workflow(
                 )
             except Exception as exc:  # noqa: BLE001 — кеш не повинен валити основний потік
                 emit_progress(progress, f"Кеш аналогів: не вдалося зберегти ({exc}).")
+        elif cache_key and selected_collection.candidates:
+            emit_progress(
+                progress,
+                "Кеш аналогів: НЕ зберігаю — аналоги не з того ж ЖК/будинку "
+                "(уникаю кешування неточних).",
+            )
 
     excel_result: FillResult | None = None
     fill_error: str | None = None
