@@ -80,6 +80,14 @@ def select_candidates(
         selected_candidates.append(candidate)
 
     warnings: list[str] = []
+    selected_same = sum(
+        1 for _s, _i, _c, rec in ranked if rec.metrics.get("same_complex_or_address") is True
+    )
+    if cfg.get("prefer_same_complex_or_address") and selected_candidates and selected_same == 0:
+        warnings.append(
+            "analogs_not_same_complex_or_building: жоден з обраних аналогів не з того ж ЖК/будинку — "
+            "оцінка орієнтовна, уточніть аналоги вручну або вкажіть «Назва ЖК»"
+        )
     if len(selected_candidates) < required_count:
         warnings.append(f"selected_only_{len(selected_candidates)}_candidate(s)_required_{required_count}")
     if not candidates:
@@ -225,6 +233,12 @@ def _score_candidate(
         record.metrics["price_per_m2_delta_from_pool_median_pct"] = round(price_delta_pct, 2)
         score += min(price_delta_pct * 0.35, 35.0)
         record.score_reasons.append(f"price_per_m2_pool_delta_pct={price_delta_pct:.1f}")
+        # Отсев ценовых выбросов: цена/м² слишком далеко от медианы пула → выкидываем,
+        # чтобы единичные дорогие/дешёвые объекты не раздували оценку.
+        if price_delta_pct > cfg["max_ppsqm_outlier_pct"]:
+            record.rejection_reasons.append(
+                f"price_per_m2_outlier_gt_{cfg['max_ppsqm_outlier_pct']:.0f}_pct"
+            )
 
     complex_score = _complex_score(target.get("complex_name"), candidate)
     if complex_score:
@@ -270,6 +284,7 @@ def _selection_config(collection_config: dict[str, Any], target: dict[str, Any])
         "prefer_source_diversity": _optional_bool(raw.get("prefer_source_diversity"), default=True),
         "preferred_area_delta_pct": _optional_float(raw.get("preferred_area_delta_pct"), default=35.0),
         "max_area_delta_pct": _optional_float(raw.get("max_area_delta_pct"), default=default_max_area_delta),
+        "max_ppsqm_outlier_pct": _optional_float(raw.get("max_ppsqm_outlier_pct"), default=45.0),
     }
 
 
