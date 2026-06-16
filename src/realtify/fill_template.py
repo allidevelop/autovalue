@@ -395,6 +395,8 @@ def _fill_target_openpyxl(ws: Any, profile: TemplateProfile, target: dict[str, A
 
 
 def _write_openpyxl_cell(cell: Any, value: Any, *, hyperlink: bool = False) -> None:
+    if value is not None and not isinstance(value, (str, int, float, bool, datetime)):
+        value = str(value)
     cell.value = "" if value is None else value
     if hyperlink and value:
         cell.hyperlink = str(value)
