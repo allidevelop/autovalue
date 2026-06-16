@@ -53,14 +53,30 @@ def address_key(
     property_type: str | None,
     complex_name: str | None = None,
 ) -> str:
-    """Стабільний ключ адреси на рівні будинку (без номера квартири)."""
-    parts = [str(p) for p in (city, address, complex_name, property_type) if p]
-    raw = " ".join(parts).lower()
-    # відкидаємо номер квартири/апартаментів — аналоги спільні для будинку
+    """Стабільний ключ адреси на рівні будинку (без номера квартири).
+
+    Стійкий до варіацій написання: «17-К»=«17К», «будинок/м.»-префікси,
+    дубль міста в city та address. Так бібліотека імпорту й оцінка дають один ключ.
+    """
+    parts = [str(p) for p in (city, address, complex_name) if p]
+    raw = " ".join(parts).lower().replace("’", "'")
+    # номер квартири/апартаментів відкидаємо — аналоги спільні для будинку
     raw = re.sub(r"\b(?:кв\.?|квартира|апартаменти?|apt\.?)\s*№?\s*\d+\S*", " ", raw)
-    raw = re.sub(r"[^0-9a-zа-яіїєґ'\s-]", " ", raw)
-    raw = re.sub(r"\s+", "-", raw.strip())
-    return raw.strip("-")[:200]
+    # generic-слова будинку/міста
+    raw = re.sub(r"\b(?:будинок|буд|місто|м)\b\.?", " ", raw)
+    # усе, крім букв/цифр/пробілів → пробіл (зокрема дефіси, коми, крапки)
+    raw = re.sub(r"[^0-9a-zа-яіїєґ'\s]", " ", raw)
+    # склеюємо «17 к» → «17к»
+    raw = re.sub(r"(\d+)\s+([a-zа-яіїєґ])(?=\s|$)", r"\1\2", raw)
+    # дедуп підряд однакових токенів (місто могло потрапити і в city, і в address)
+    tokens: list[str] = []
+    for token in raw.split():
+        if not tokens or tokens[-1] != token:
+            tokens.append(token)
+    key = "-".join(tokens)
+    if property_type:
+        key = f"{key}-{str(property_type).strip().lower()}"
+    return key.strip("-")[:200]
 
 
 def lookup(key: str, job_output_dir: Path) -> list[Comparable] | None:
