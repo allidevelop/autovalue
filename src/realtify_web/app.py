@@ -59,8 +59,13 @@ class WebJob:
     started_at: str | None = None
     finished_at: str | None = None
     error: str | None = None
+    cancel_requested: bool = False
     events: list[str] = field(default_factory=list)
     artifacts: list[WebArtifact] = field(default_factory=list)
+
+
+class JobCancelled(RuntimeError):
+    pass
 
 
 app = FastAPI(title="Realtify Web", version="0.1.0")
@@ -245,6 +250,19 @@ def get_job(job_id: str) -> dict[str, Any]:
     return _job_payload(job_id)
 
 
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict[str, Any]:
+    job = _get_job(job_id)
+    with JOBS_LOCK:
+        if job.status in {"passed", "failed", "cancelled"}:
+            return _job_payload(job_id)
+        job.cancel_requested = True
+        job.status = "cancelling"
+        job.error = "Задача остановлена пользователем."
+    _append_event(job_id, "Задача получила команду остановки. Workflow завершится на ближайшем безопасном шаге.")
+    return _job_payload(job_id)
+
+
 @app.get("/api/jobs/{job_id}/events")
 def get_job_events(job_id: str) -> dict[str, Any]:
     job = _get_job(job_id)
@@ -277,6 +295,9 @@ def _run_job(
     required_count: int,
     allow_less: bool,
 ) -> None:
+    if _job_cancel_requested(job_id):
+        _mark_job_cancelled(job_id)
+        return
     _set_job(job_id, status="running", started_at=_now_iso())
     _append_event(job_id, "Запуск batch workflow: один отчет на каждый объект из PDF.")
     _append_event(job_id, f"PDF: {pdf_path.name}")
@@ -309,14 +330,17 @@ def _run_job(
             visible=False,
             report_template_path=word_path,
             include_full_screenshots=include_full_screenshots,
-            progress=lambda message: _append_event(job_id, message),
+            progress=lambda message: _append_progress_or_cancel(job_id, message),
         )
+        _raise_if_cancelled(job_id)
         artifacts = _package_result(job_id, result)
         status = "passed" if result.ok else "failed"
         error = None if result.ok else "Один или несколько отчетов завершились с ошибкой. Проверьте batch_report.md."
         _set_job(job_id, status=status, finished_at=_now_iso(), error=error, artifacts=artifacts)
         _append_event(job_id, "Задача завершена: " + ("PASS" if result.ok else "FAIL"))
         _notify_job_finished(job_id)
+    except JobCancelled:
+        _mark_job_cancelled(job_id)
     except Exception as exc:  # noqa: BLE001 - web job must capture the full failure for the UI.
         trace = traceback.format_exc()
         _append_event(job_id, f"Ошибка: {exc}")
@@ -774,6 +798,35 @@ def _append_event(job_id: str, message: str) -> None:
             handle.write(line + "\n")
 
 
+def _append_progress_or_cancel(job_id: str, message: str) -> None:
+    _raise_if_cancelled(job_id)
+    _append_event(job_id, message)
+    _raise_if_cancelled(job_id)
+
+
+def _job_cancel_requested(job_id: str) -> bool:
+    job = _get_job(job_id)
+    with JOBS_LOCK:
+        return job.cancel_requested or job.status == "cancelling"
+
+
+def _raise_if_cancelled(job_id: str) -> None:
+    if _job_cancel_requested(job_id):
+        raise JobCancelled("Job cancelled by user.")
+
+
+def _mark_job_cancelled(job_id: str) -> None:
+    job = _get_job(job_id)
+    with JOBS_LOCK:
+        already_cancelled = job.status == "cancelled"
+        job.cancel_requested = True
+        job.status = "cancelled"
+        job.finished_at = job.finished_at or _now_iso()
+        job.error = "Задача остановлена пользователем."
+    if not already_cancelled:
+        _append_event(job_id, "Задача отменена: CANCELLED")
+
+
 def _set_job(job_id: str, **updates: Any) -> None:
     job = _get_job(job_id)
     with JOBS_LOCK:
@@ -819,6 +872,8 @@ def _hydrate_job_from_disk(job_id: str) -> WebJob | None:
     error = None
     if status == "failed":
         error = "Один или несколько отчетов завершились с ошибкой. Проверьте batch_report.md."
+    elif status == "cancelled":
+        error = "Задача остановлена пользователем."
 
     job = WebJob(
         id=job_id,
@@ -828,7 +883,7 @@ def _hydrate_job_from_disk(job_id: str) -> WebJob | None:
         output_dir=output_dir,
         runtime_log=runtime_log,
         started_at=_created_at_from_job_id(job_id),
-        finished_at=finished_at if status in {"passed", "failed"} else None,
+        finished_at=finished_at if status in {"passed", "failed", "cancelled"} else None,
         error=error,
         events=events,
         artifacts=artifacts,
@@ -846,6 +901,10 @@ def _read_runtime_events(runtime_log: Path) -> list[str]:
 
 def _status_from_events(events: list[str]) -> str:
     for line in reversed(events):
+        if "Задача отменена: CANCELLED" in line:
+            return "cancelled"
+        if "Задача получила команду остановки" in line:
+            return "cancelled"
         if "Задача завершена: PASS" in line:
             return "passed"
         if "Задача завершена: FAIL" in line:
@@ -899,6 +958,7 @@ def _job_payload(job_id: str) -> dict[str, Any]:
     job = _get_job(job_id)
     with JOBS_LOCK:
         events = list(job.events[-250:])
+        cancel_requested = job.cancel_requested
         artifacts = [
             {
                 "name": item.name,
@@ -911,6 +971,8 @@ def _job_payload(job_id: str) -> dict[str, Any]:
     return {
         "id": job.id,
         "status": job.status,
+        "cancel_requested": cancel_requested,
+        "can_cancel": job.status in {"queued", "running", "cancelling"},
         "created_at": job.created_at,
         "started_at": job.started_at,
         "finished_at": job.finished_at,

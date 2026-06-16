@@ -243,6 +243,12 @@
       color: var(--accent);
     }
 
+    button.danger {
+      background: #fff1f1;
+      border-color: rgba(180, 35, 24, 0.55);
+      color: var(--danger);
+    }
+
     button:disabled {
       cursor: wait;
       opacity: 0.62;
@@ -271,7 +277,8 @@
     }
 
     .pill.running,
-    .pill.queued {
+    .pill.queued,
+    .pill.cancelling {
       color: var(--warn);
       border-color: rgba(161, 98, 7, 0.45);
       background: #fff8e7;
@@ -287,6 +294,12 @@
       color: var(--danger);
       border-color: rgba(180, 35, 24, 0.45);
       background: #fff1f1;
+    }
+
+    .pill.cancelled {
+      color: var(--muted);
+      border-color: var(--line);
+      background: var(--surface-soft);
     }
 
     .job-meta {
@@ -483,6 +496,7 @@
 
             <div class="actions">
               <button id="startButton" type="submit" class="primary">Запустить отчет</button>
+              <button id="stopButton" type="button" class="danger" disabled>Остановить</button>
               <button id="refreshButton" type="button" class="secondary">Обновить статус</button>
               <button id="notifyButton" type="button" class="secondary">Включить уведомления</button>
             </div>
@@ -511,6 +525,7 @@
   <script>
     const form = document.getElementById("jobForm");
     const startButton = document.getElementById("startButton");
+    const stopButton = document.getElementById("stopButton");
     const refreshButton = document.getElementById("refreshButton");
     const notifyButton = document.getElementById("notifyButton");
     const notifyNote = document.getElementById("notifyNote");
@@ -627,6 +642,8 @@
       logEl.textContent = (job.events && job.events.length ? job.events.join("\n") : "Лог пока пуст.");
       logEl.scrollTop = logEl.scrollHeight;
       setError(job.error || "");
+      stopButton.disabled = !job.can_cancel || job.status === "cancelling";
+      stopButton.textContent = job.status === "cancelling" ? "Останавливаю..." : "Остановить";
       artifactsEl.innerHTML = "";
       (job.artifacts || []).forEach((artifact) => {
         const row = document.createElement("div");
@@ -640,8 +657,10 @@
         row.append(link, meta);
         artifactsEl.append(row);
       });
-      if (["passed", "failed"].includes(job.status)) {
+      if (["passed", "failed", "cancelled"].includes(job.status)) {
         startButton.disabled = false;
+        stopButton.disabled = true;
+        stopButton.textContent = "Остановить";
         if (notify) notifyIfFinished(job);
         if (pollTimer) {
           clearInterval(pollTimer);
@@ -657,6 +676,20 @@
       renderJob(await response.json());
     }
 
+    async function cancelJob() {
+      if (!currentJobId) return;
+      stopButton.disabled = true;
+      stopButton.textContent = "Останавливаю...";
+      const response = await fetch("/api/jobs/" + currentJobId + "/cancel", { method: "POST" });
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({}));
+        throw new Error(errorPayload.detail || "Не удалось остановить задачу");
+      }
+      renderJob(await response.json(), { notify: false });
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(() => refreshJob().catch((error) => setError(error.message)), 2000);
+    }
+
     async function loadLatestJob() {
       const response = await fetch("/api/jobs");
       if (!response.ok) return;
@@ -664,7 +697,7 @@
       const latest = payload.jobs && payload.jobs.length ? payload.jobs[0] : null;
       if (!latest) return;
       renderJob(latest, { notify: false });
-      if (["queued", "running"].includes(latest.status)) {
+      if (["queued", "running", "cancelling"].includes(latest.status)) {
         if (pollTimer) clearInterval(pollTimer);
         pollTimer = setInterval(() => refreshJob().catch((error) => setError(error.message)), 2000);
       }
@@ -697,6 +730,7 @@
       event.preventDefault();
       setError("");
       startButton.disabled = true;
+      stopButton.disabled = true;
       artifactsEl.innerHTML = "";
       logEl.textContent = "Файлы загружаются...";
       setStatus("queued");
@@ -718,12 +752,14 @@
         pollTimer = setInterval(() => refreshJob().catch((error) => setError(error.message)), 2000);
       } catch (error) {
         startButton.disabled = false;
+        stopButton.disabled = true;
         setStatus("failed");
         setError(error.message);
       }
     });
 
     refreshButton.addEventListener("click", () => refreshJob().catch((error) => setError(error.message)));
+    stopButton.addEventListener("click", () => cancelJob().catch((error) => setError(error.message)));
     notifyButton.addEventListener("click", () => enableNotifications().catch((error) => setError(error.message)));
     checkHealth();
     loadLatestJob().catch(() => {});
