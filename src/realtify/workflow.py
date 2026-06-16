@@ -157,6 +157,12 @@ def run_excel_workflow(
         )
         save_selection_result(selection, out_dir)
         emit_progress(progress, f"Відбір завершено: обрано {len(selection.selected_candidates)} з {len(collection.candidates)} кандидатів.")
+        if any(w.startswith("analogs_not_same_complex") for w in selection.warnings):
+            emit_progress(
+                progress,
+                "УВАГА: жоден аналог не з того ж ЖК/будинку — оцінка орієнтовна. "
+                "Вкажіть «Назва ЖК» або додайте ручні посилання на аналоги цього будинку.",
+            )
         selected_collection = CollectionResult(
             output_dir=out_dir,
             candidates=selection.selected_candidates,
