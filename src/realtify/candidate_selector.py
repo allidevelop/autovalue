@@ -193,6 +193,33 @@ def _score_candidate(
         score += 15.0
         record.score_reasons.append("candidate_rooms_missing")
 
+    building_class_match = _field_text_match(target.get("building_class") or target.get("complex_class"), candidate.building_class)
+    record.metrics["building_class_match"] = building_class_match
+    if building_class_match is True:
+        score -= 6.0
+        record.score_reasons.append("same_building_class")
+    elif building_class_match is False:
+        score += 35.0
+        record.score_reasons.append("building_class_mismatch")
+    elif target.get("building_class") or target.get("complex_class"):
+        score += 8.0
+        record.score_reasons.append("candidate_building_class_missing")
+
+    target_condition = target.get("condition")
+    if not target_condition and cfg["only_newbuilds"]:
+        target_condition = "без ремонту"
+    condition_match = _condition_match(target_condition, candidate.condition)
+    record.metrics["condition_match"] = condition_match
+    if condition_match is True:
+        score -= 8.0
+        record.score_reasons.append("same_condition")
+    elif condition_match is False:
+        score += 25.0
+        record.score_reasons.append("condition_mismatch")
+    elif target_condition:
+        score += 5.0
+        record.score_reasons.append("candidate_condition_missing")
+
     if median_price_per_m2 and candidate.price_per_m2_usd:
         price_delta_pct = abs(candidate.price_per_m2_usd - median_price_per_m2) / median_price_per_m2 * 100
         record.metrics["price_per_m2_delta_from_pool_median_pct"] = round(price_delta_pct, 2)
@@ -435,6 +462,54 @@ def _street_tokens(value: str) -> list[str]:
     }
     tokens = [token for token in _normalize_text(value).split() if len(token) >= 5 and token not in stop and not token.isdigit()]
     return tokens[:4]
+
+
+def _field_text_match(target_value: Any, candidate_value: Any) -> bool | None:
+    if target_value in (None, ""):
+        return None
+    target = _normalize_text(str(target_value))
+    candidate = _normalize_text(str(candidate_value or ""))
+    if not candidate:
+        return None
+    if target in candidate or candidate in target:
+        return True
+    target_tokens = {token for token in target.split() if len(token) >= 4}
+    candidate_tokens = {token for token in candidate.split() if len(token) >= 4}
+    if not target_tokens or not candidate_tokens:
+        return None
+    return bool(target_tokens & candidate_tokens)
+
+
+def _condition_match(target_value: Any, candidate_value: Any) -> bool | None:
+    if target_value in (None, ""):
+        return None
+    target = _condition_bucket(str(target_value))
+    candidate = _condition_bucket(str(candidate_value or ""))
+    if target and candidate:
+        return target == candidate
+    return _field_text_match(target_value, candidate_value)
+
+
+def _condition_bucket(value: str) -> str | None:
+    normalized = _normalize_text(value)
+    if not normalized:
+        return None
+    without_repair_markers = [
+        "без ремонту",
+        "без ремонта",
+        "після будівельників",
+        "после строителей",
+        "від забудовника",
+        "от застройщика",
+        "під ремонт",
+        "под ремонт",
+    ]
+    if any(marker in normalized for marker in without_repair_markers):
+        return "without_repair"
+    with_repair_markers = ["з ремонтом", "с ремонтом", "євроремонт", "евроремонт", "ремонт"]
+    if any(marker in normalized for marker in with_repair_markers):
+        return "with_repair"
+    return None
 
 
 def _has_newbuild_signal(candidate: Comparable) -> bool:
