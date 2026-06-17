@@ -14,6 +14,7 @@ from rich.console import Console
 
 from realtify import analog_cache
 from realtify.candidate_selector import CandidateSelectionResult, save_selection_result, select_candidates
+from realtify.complex_search import resolve_complex_catalog_url
 from realtify.collect_from_links import CollectionResult, collect_from_links, read_links, save_collection_result
 from realtify.discover_links import DiscoveryResult, discover_links_for_task, save_discovery_result
 from realtify.fill_template import FillResult, fill_excel_template, load_template_profile
@@ -49,6 +50,8 @@ def run_excel_workflow(
     allow_less: bool = False,
     allow_incomplete: bool = False,
     visible: bool = False,
+    force_research: bool = False,
+    complex_search_url: str | None = None,
     progress: ProgressCallback | None = None,
 ) -> WorkflowResult:
     emit_progress(progress, "Excel workflow: читаю task.generated.yaml та профіль шаблону.")
@@ -87,6 +90,27 @@ def run_excel_workflow(
     for note in valuation.notes:
         emit_progress(progress, note)
 
+    # ── Примусовий пошук аналогів заново (ігноруємо кеш-базу, шукаємо в тому ж ЖК) ──
+    force_research = force_research or _truthy(collection_cfg.get("force_research"))
+    complex_search_url = complex_search_url or _optional_str(collection_cfg.get("complex_search_url"))
+    if force_research:
+        urls = [complex_search_url] if complex_search_url else []
+        if not urls:
+            auto = resolve_complex_catalog_url(target)
+            if auto:
+                urls = [auto]
+                emit_progress(progress, f"Примусовий пошук: авто-знайдено сторінку будинку — {auto}")
+        if urls:
+            collection_cfg["search_urls"] = urls
+            collection_cfg["search_only_custom"] = True
+            emit_progress(progress, f"Примусовий пошук аналогів у тому ж ЖК/будинку: {urls[0]}")
+        else:
+            emit_progress(
+                progress,
+                "Примусовий пошук: не вдалося прив'язати до конкретного ЖК "
+                "(вставте посилання на каталог ЖК для точності). Шукаю ширше — оцінка орієнтовна.",
+            )
+
     # ── Кеш аналогів за адресою: для повторюваних адрес пропускаємо пошук ──
     cache_key = analog_cache.address_key(
         city=target.get("city"),
@@ -95,7 +119,11 @@ def run_excel_workflow(
         complex_name=target.get("complex_name"),
     )
     manual_links = links_path or _optional_path(collection_cfg.get("links_path"))
-    cached = analog_cache.lookup(cache_key, out_dir) if (cache_key and not manual_links) else None
+    cached = (
+        analog_cache.lookup(cache_key, out_dir)
+        if (cache_key and not manual_links and not force_research)
+        else None
+    )
 
     links_file: Path | None = manual_links
     discovery: DiscoveryResult | None = None
@@ -193,7 +221,12 @@ def run_excel_workflow(
             if selection
             else 0
         )
-        cache_trustworthy = bool(manual_links) or selected_same >= 1
+        # Примусовий пошук у конкретному ЖК (search_urls) — теж довіряємо й оновлюємо базу.
+        cache_trustworthy = (
+            bool(manual_links)
+            or selected_same >= 1
+            or (force_research and bool(collection_cfg.get("search_urls")))
+        )
         if cache_key and selected_collection.candidates and cache_trustworthy:
             try:
                 analog_cache.save(
@@ -477,6 +510,19 @@ def _optional_int(value: Any) -> int | None:
     if value in (None, ""):
         return None
     return int(value)
+
+
+def _optional_str(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _typed_property_type(value: Any) -> PropertyType:

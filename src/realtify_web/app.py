@@ -174,6 +174,8 @@ async def create_job(
     last_page: int | None = Form(None),
     required_count: int = Form(5),
     allow_less: bool = Form(False),
+    force_research: bool = Form(False),
+    search_url: str | None = Form(None),
 ) -> dict[str, Any]:
     job_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]
     job_dir = WEB_RUNS_ROOT / job_id
@@ -230,6 +232,8 @@ async def create_job(
             last_page,
             max(1, required_count),
             allow_less,
+            force_research,
+            (search_url or "").strip() or None,
         ),
         daemon=True,
         name=f"realtify-web-job-{job_id}",
@@ -365,6 +369,8 @@ def _run_job(
     last_page: int | None,
     required_count: int,
     allow_less: bool,
+    force_research: bool = False,
+    search_url: str | None = None,
 ) -> None:
     if _job_cancel_requested(job_id):
         _mark_job_cancelled(job_id)
@@ -375,6 +381,12 @@ def _run_job(
     _append_event(job_id, f"Excel template: {excel_path.name}")
     _append_event(job_id, f"Word template: {word_path.name}")
     _append_event(job_id, f"Profile: {profile}; required analogs: {required_count}")
+    if force_research:
+        _append_event(
+            job_id,
+            "Примусовий пошук аналогів: база ігнорується, шукаю заново в тому ж ЖК"
+            + (f" (каталог: {search_url})" if search_url else " (авто по адресу)"),
+        )
     _append_event(job_id, f"PDF render DPI: {_web_pdf_dpi()}")
     if first_page or last_page:
         _append_event(job_id, f"Ограничение страниц PDF: {first_page or 1}-{last_page or 'end'}")
@@ -401,6 +413,8 @@ def _run_job(
             visible=False,
             report_template_path=word_path,
             include_full_screenshots=include_full_screenshots,
+            force_research=force_research,
+            complex_search_url=search_url,
             progress=lambda message: _append_progress_or_cancel(job_id, message),
         )
         _raise_if_cancelled(job_id)

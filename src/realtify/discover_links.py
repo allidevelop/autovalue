@@ -105,15 +105,20 @@ def discover_links_for_task(
     limit = max_links or _optional_int(collection.get("max_discovered_links")) or max(required * 4, required)
     page_count = pages_per_source or _optional_int(collection.get("discovery_pages")) or 1
 
-    planned_pages, warnings = build_source_pages(
-        target=target,
-        sources_config=sources_config,
-        property_type=property_type,
-        transaction_type=transaction_type,
-        only_newbuilds=only_newbuilds,
-        pages_per_source=page_count,
-    )
-    planned_pages.extend(_custom_source_pages(collection.get("search_urls"), sources_config))
+    custom_pages = _custom_source_pages(collection.get("search_urls"), sources_config)
+    if _optional_bool(collection.get("search_only_custom"), default=False) and custom_pages:
+        # Примусовий пошук у конкретному ЖК/будинку: лише задані каталог-URL, без city-wide.
+        planned_pages, warnings = list(custom_pages), []
+    else:
+        planned_pages, warnings = build_source_pages(
+            target=target,
+            sources_config=sources_config,
+            property_type=property_type,
+            transaction_type=transaction_type,
+            only_newbuilds=only_newbuilds,
+            pages_per_source=page_count,
+        )
+        planned_pages.extend(custom_pages)
     if not planned_pages:
         raise DiscoveryError("No source search pages could be built. Check target.city, target.property_type, and config/sources.yaml.")
 

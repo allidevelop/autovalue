@@ -66,6 +66,8 @@ def run_batch_workflow(
     visible: bool = False,
     report_template_path: Path | None = None,
     include_full_screenshots: bool = False,
+    force_research: bool = False,
+    complex_search_url: str | None = None,
     progress: ProgressCallback | None = None,
 ) -> BatchWorkflowResult:
     pdf_file = _resolve_path(pdf_path)
@@ -112,6 +114,8 @@ def run_batch_workflow(
             visible=visible,
             report_template_path=_resolve_path(report_template_path) if report_template_path else None,
             include_full_screenshots=include_full_screenshots,
+            force_research=force_research,
+            complex_search_url=complex_search_url,
             progress=progress,
             object_index=index,
             total_objects=len(extracts),
@@ -144,6 +148,8 @@ def _run_object_from_package(
     visible: bool,
     report_template_path: Path | None,
     include_full_screenshots: bool,
+    force_research: bool,
+    complex_search_url: str | None,
     progress: ProgressCallback | None,
     object_index: int,
     total_objects: int,
@@ -176,6 +182,8 @@ def _run_object_from_package(
             allow_less=allow_less,
             allow_incomplete=allow_incomplete,
             visible=visible,
+            force_research=force_research,
+            complex_search_url=complex_search_url,
             progress=progress,
         )
         if report_template_path:
