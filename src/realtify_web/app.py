@@ -312,6 +312,47 @@ def _run_import_job(job_id: str, file_path: Path) -> None:
         _notify_job_finished(job_id)
 
 
+# ── База аналогів (CRUD для веб-сторінки realtifysaas) ──────────────────────
+
+@app.get("/api/analogs/groups")
+def analogs_groups() -> dict[str, Any]:
+    from realtify import report_db
+    return {"groups": report_db.list_groups()}
+
+
+@app.get("/api/analogs")
+def analogs_list(address_key: str) -> dict[str, Any]:
+    from realtify import report_db
+    return {"items": report_db.list_items(address_key)}
+
+
+@app.post("/api/analogs")
+async def analogs_create(request: Request) -> dict[str, Any]:
+    from realtify import report_db
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="JSON object expected")
+    return {"item": report_db.create(payload)}
+
+
+@app.put("/api/analogs/{item_id}")
+async def analogs_update(item_id: int, request: Request) -> dict[str, Any]:
+    from realtify import report_db
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="JSON object expected")
+    item = report_db.update(item_id, payload)
+    if item is None:
+        raise HTTPException(status_code=404, detail="analog not found")
+    return {"item": item}
+
+
+@app.delete("/api/analogs/{item_id}")
+def analogs_delete(item_id: int) -> dict[str, Any]:
+    from realtify import report_db
+    return {"deleted": report_db.delete(item_id)}
+
+
 @app.get("/api/jobs")
 def list_jobs() -> dict[str, Any]:
     _hydrate_recent_jobs_from_disk()
