@@ -405,10 +405,11 @@ def _custom_source_pages(value: Any, sources_config: SourcesConfig) -> list[tupl
         url = str(item).strip()
         if not url:
             continue
-        source_key, _source = sources_config.detect_source(url)
-        if source_key == "developer_or_agency":
+        # Каталог-сторінка ЖК не є посиланням-оголошенням → детект за доменом.
+        detected = sources_config.detect_source_by_domain(url)
+        if detected is None:
             continue
-        planned.append((source_key, url))
+        planned.append((detected[0], url))
     return planned
 
 

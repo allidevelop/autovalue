@@ -43,6 +43,13 @@ class SourceDefinition(BaseModel):
     search_url_templates: dict[str, list[str]] = Field(default_factory=dict)
     notes: str | None = None
 
+    def matches_domain(self, url: str) -> bool:
+        """Лише за доменом (для каталог-сторінок ЖК, що не є посиланням-оголошенням)."""
+        host = (urlparse(url).netloc or "").lower()
+        host_no_www = host[4:] if host.startswith("www.") else host
+        domains = {d.lower().removeprefix("www.") for d in self.domains}
+        return any(host_no_www == domain or host_no_www.endswith(f".{domain}") for domain in domains)
+
     def matches_url(self, url: str) -> bool:
         parsed = urlparse(url)
         host = (parsed.netloc or "").lower()
@@ -71,6 +78,15 @@ class SourcesConfig(BaseModel):
             [(name, source) for name, source in self.sources.items() if source.enabled],
             key=lambda item: item[1].priority,
         )
+
+    def detect_source_by_domain(self, url: str) -> tuple[str, SourceDefinition] | None:
+        """Джерело за доменом (для каталог-URL ЖК). None, якщо домен невідомий."""
+        for name, source in self.enabled_sources():
+            if name == "developer_or_agency":
+                continue
+            if source.matches_domain(url):
+                return name, source
+        return None
 
     def detect_source(self, url: str) -> tuple[str, SourceDefinition]:
         for name, source in self.enabled_sources():
