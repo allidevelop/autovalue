@@ -220,12 +220,15 @@ def _build_record(
 
 # ── нормалізатори ────────────────────────────────────────────────────────────
 
+_QUOTES = " \t\"'«»„“”‚‘’,;"
+
+
 def _split_address_complex(raw: str) -> tuple[str, str | None]:
     text = " ".join(raw.split())
-    m = re.search(r"\bжк\b[\s\"'«]*([^\"'»]+)[\"'»]?", text, flags=re.IGNORECASE)
+    m = re.search(r"\bжк\b[\s\"'«„“‚,]*([^\"'»“”]+)", text, flags=re.IGNORECASE)
     complex_name = None
     if m:
-        complex_name = m.group(1).strip().strip("\"'«»").strip()
+        complex_name = m.group(1).strip(_QUOTES).strip()
         text = text[: m.start()].strip(" ,;")
     return text, complex_name or None
 
@@ -280,19 +283,21 @@ def _extract_city(text: str) -> str | None:
 
 
 def _extract_report_date(text: str) -> date | None:
-    m = re.search(r"(\d{1,2})\s+([а-яіїєґ]+)\s+(\d{4})", text.lower())
-    if m and m.group(2) in _UA_MONTHS:
+    """Дата оцінки = найсвіжіша дата у звіті (поряд є й стара дата-еталон 2020)."""
+    cands: list[date] = []
+    for m in re.finditer(r"(\d{1,2})\s+([а-яіїєґ]+)\s+(\d{4})", text.lower()):
+        if m.group(2) in _UA_MONTHS:
+            try:
+                cands.append(date(int(m.group(3)), _UA_MONTHS[m.group(2)], int(m.group(1))))
+            except ValueError:
+                pass
+    for m in re.finditer(r"(\d{1,2})[.](\d{1,2})[.](\d{4})", text):
         try:
-            return date(int(m.group(3)), _UA_MONTHS[m.group(2)], int(m.group(1)))
+            cands.append(date(int(m.group(3)), int(m.group(2)), int(m.group(1))))
         except ValueError:
-            return None
-    m2 = re.search(r"(\d{1,2})[.](\d{1,2})[.](\d{4})", text)
-    if m2:
-        try:
-            return date(int(m2.group(3)), int(m2.group(2)), int(m2.group(1)))
-        except ValueError:
-            return None
-    return None
+            pass
+    cands = [d for d in cands if 2015 <= d.year <= 2030]
+    return max(cands) if cands else None
 
 
 # ── конвертація .doc → .docx ─────────────────────────────────────────────────
