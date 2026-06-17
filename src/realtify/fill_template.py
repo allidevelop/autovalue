@@ -72,6 +72,7 @@ def fill_excel_template(
     allow_less: bool = False,
     allow_incomplete: bool = False,
     visible: bool = False,
+    nbu_rate: float | None = None,
 ) -> FillResult:
     required = required_count or len(profile.comparables_columns)
     warnings = _validate_candidates(
@@ -101,6 +102,7 @@ def fill_excel_template(
             profile=profile,
             selected=selected,
             target=target,
+            nbu_rate=nbu_rate,
         )
         warnings.append(
             "python_xls_backend_flattens_excel_formulas; use Microsoft Excel COM or LibreOffice for formula-safe workbooks"
@@ -112,6 +114,7 @@ def fill_excel_template(
             profile=profile,
             selected=selected,
             target=target,
+            nbu_rate=nbu_rate,
         )
     else:
         raise FillError(f"Unsupported Excel backend: {backend}")
@@ -154,6 +157,7 @@ def _fill_with_libreoffice(
     profile: TemplateProfile,
     selected: list[Comparable],
     target: dict[str, Any] | None,
+    nbu_rate: float | None = None,
 ) -> Path | None:
     soffice = libreoffice_path()
     if not soffice:
@@ -209,6 +213,7 @@ def _fill_with_libreoffice(
         candidates=selected,
         target=target,
         template_rows=template_rows,
+        nbu_rate=nbu_rate,
     )
     return write_excel_sidecar(output_path, payload)
 
@@ -220,6 +225,7 @@ def _fill_with_python_xls(
     profile: TemplateProfile,
     selected: list[Comparable],
     target: dict[str, Any] | None,
+    nbu_rate: float | None = None,
 ) -> Path:
     if template_path.suffix.lower() != ".xls":
         raise FillError(
@@ -252,6 +258,7 @@ def _fill_with_python_xls(
         candidates=selected,
         target=target,
         template_rows=template_rows,
+        nbu_rate=nbu_rate,
     )
     output_book.save(str(output_path))
     return write_excel_sidecar(output_path, payload)

@@ -87,8 +87,10 @@ def build_calculation_sidecar_payload(
     candidates: list[Comparable],
     target: dict[str, Any] | None,
     template_rows: dict[int, list[Any]] | None = None,
-    nbu_rate: float = DEFAULT_NBU_RATE,
+    nbu_rate: float | None = DEFAULT_NBU_RATE,
 ) -> dict[str, Any]:
+    if nbu_rate is None:
+        nbu_rate = DEFAULT_NBU_RATE
     target = target or {}
     target_area = _to_float(target.get("area_m2"))
     selected = candidates[:5]

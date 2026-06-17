@@ -530,11 +530,16 @@ def _build_task_yaml(
     living_area = _prefer(selected_extract.living_area_m2 if selected_extract else None, selected_technical.living_area_m2 if selected_technical else None)
     rooms = selected_technical.rooms_count if selected_technical else None
     object_type = selected_extract.object_type if selected_extract else None
+    apartment_number = _prefer(
+        selected_extract.apartment_number if selected_extract else None,
+        selected_technical.apartment_number if selected_technical else None,
+    )
 
     return {
         "target": {
             "city": city,
             "address": address,
+            "apartment_number": apartment_number,
             "complex_name": complex_name,
             "property_type": _property_type_from_object_type(object_type, profile),
             "transaction_type": "sale",

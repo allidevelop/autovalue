@@ -1,10 +1,29 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from realtify import nbu_rate as nbu_rate_api
+from realtify import valuation_register
 from realtify.paths import PROJECT_ROOT
+from realtify.valuation_register import RegisterEntry
+
+# Орієнтовний резервний курс — лише якщо реєстр/мережа недоступні.
+DEFAULT_FALLBACK_NBU_RATE = 41.0
+
+
+@dataclass
+class ValuationContext:
+    """Дата оцінки + курс НБУ на неї + примітки для лога/звіту."""
+
+    valuation_date: date
+    nbu_rate: float | None
+    rate_is_official: bool
+    source: str  # 'explicit' | 'register' | 'cell' | 'today'
+    matched_entry: RegisterEntry | None = None
+    notes: list[str] = field(default_factory=list)
 
 
 def resolve_valuation_date(*, task: dict[str, Any], excel_path: Path | None = None) -> date:
@@ -12,6 +31,10 @@ def resolve_valuation_date(*, task: dict[str, Any], excel_path: Path | None = No
     explicit = _parse_date(_first_not_empty(task.get("valuation_date"), target.get("valuation_date")))
     if explicit:
         return explicit
+
+    from_register, _entry = _resolve_from_register(task)
+    if from_register:
+        return from_register
 
     source = _first_mapping(
         task.get("valuation_date_source"),
@@ -28,6 +51,85 @@ def resolve_valuation_date(*, task: dict[str, Any], excel_path: Path | None = No
             return parsed
 
     return date.today()
+
+
+def resolve_valuation_context(task: dict[str, Any], *, excel_path: Path | None = None) -> ValuationContext:
+    """Повний контекст оцінки: дата + курс НБУ на цю дату + примітки.
+
+    Порядок дати: явна → реєстр клієнта → excel-комірка → сьогодні.
+    Курс: офіційний НБУ на дату; якщо мережа/реєстр недоступні — орієнтовний резерв.
+    """
+    target = task.get("target") if isinstance(task.get("target"), dict) else {}
+    notes: list[str] = []
+
+    explicit = _parse_date(_first_not_empty(task.get("valuation_date"), target.get("valuation_date")))
+    if explicit:
+        valuation_date, source, entry = explicit, "explicit", None
+    else:
+        register_date, entry = _resolve_from_register(task)
+        if register_date and entry is not None:
+            valuation_date, source = register_date, "register"
+            notes.append(
+                f"Дата оцінки з реєстру: {register_date.strftime('%d.%m.%Y')} "
+                f"(кв. {entry.apartment or '?'}, {entry.address or '?'}"
+                + (f", {entry.fund}" if entry.fund else "")
+                + ")."
+            )
+        else:
+            cell_date = resolve_valuation_date(task=task, excel_path=excel_path)
+            if cell_date == date.today():
+                valuation_date, source = cell_date, "today"
+                if _register_configured(task):
+                    notes.append(
+                        "Реєстр оцінок: об'єкт не знайдено за № квартири/адресою — "
+                        f"дату взято поточну ({cell_date.strftime('%d.%m.%Y')})."
+                    )
+            else:
+                valuation_date, source = cell_date, "cell"
+            entry = None
+
+    rate = nbu_rate_api.usd_uah_rate(valuation_date)
+    if rate is not None:
+        rate_is_official = True
+        notes.append(f"Курс НБУ на {valuation_date.strftime('%d.%m.%Y')}: {rate:.4f} грн/USD.")
+    else:
+        rate = DEFAULT_FALLBACK_NBU_RATE
+        rate_is_official = False
+        notes.append(
+            f"Курс НБУ недоступний — використано орієнтовний резерв {rate:.2f} грн/USD."
+        )
+
+    return ValuationContext(
+        valuation_date=valuation_date,
+        nbu_rate=rate,
+        rate_is_official=rate_is_official,
+        source=source,
+        matched_entry=entry,
+        notes=notes,
+    )
+
+
+def _resolve_from_register(task: dict[str, Any]) -> tuple[date | None, RegisterEntry | None]:
+    path = valuation_register.register_path_from_task(task)
+    if not path:
+        return None, None
+    target = task.get("target") if isinstance(task.get("target"), dict) else {}
+    entries = valuation_register.load_register(path)
+    if not entries:
+        return None, None
+    entry = valuation_register.find_entry(
+        entries,
+        apartment=target.get("apartment_number") or target.get("apartment"),
+        city=target.get("city"),
+        address=target.get("address"),
+    )
+    if entry and entry.valuation_date:
+        return entry.valuation_date, entry
+    return None, None
+
+
+def _register_configured(task: dict[str, Any]) -> bool:
+    return valuation_register.register_path_from_task(task) is not None
 
 
 def _read_valuation_date_source(source: dict[str, Any], *, fallback_excel_path: Path | None) -> Any:

@@ -20,6 +20,7 @@ from realtify.models import PropertyType, TransactionType
 from realtify.paths import PROJECT_ROOT, RESOURCE_ROOT, ensure_output_dir
 from realtify.progress import ProgressCallback, emit_progress
 from realtify.source_config import load_sources_config
+from realtify.valuation_date import resolve_valuation_context
 
 
 class WorkflowError(RuntimeError):
@@ -78,6 +79,11 @@ def run_excel_workflow(
     transaction_type = _typed_transaction_type(target.get("transaction_type") or "sale")
     out_dir = _resolve_path(output_dir) if output_dir else _default_workflow_output_dir(target)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Дата оцінки (реєстр клієнта) + курс НБУ на цю дату ──
+    valuation = resolve_valuation_context(task)
+    for note in valuation.notes:
+        emit_progress(progress, note)
 
     # ── Кеш аналогів за адресою: для повторюваних адрес пропускаємо пошук ──
     cache_key = analog_cache.address_key(
@@ -223,6 +229,7 @@ def run_excel_workflow(
             allow_less=allow_less,
             allow_incomplete=allow_incomplete,
             visible=visible,
+            nbu_rate=valuation.nbu_rate,
         )
         emit_progress(progress, f"Excel-шаблон заповнено: {excel_result.output_path}")
     except Exception as exc:
