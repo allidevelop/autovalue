@@ -393,6 +393,9 @@ def _writeback_estimate_to_register(
     entry = valuation.matched_entry
     if entry is None or not _writeback_enabled(task):
         return
+    if not valuation.apartment_verified:
+        # № квартири не підтверджено точно — не пишемо, щоб не потрапити в чужий рядок.
+        return
     register_path = valuation_register.register_path_from_task(task)
     if not register_path:
         return

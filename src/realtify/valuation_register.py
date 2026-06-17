@@ -143,6 +143,9 @@ def write_estimate(
         return False
     if not path.exists():
         return False
+    # openpyxl не round-trip'ить макроси/бінарний формат — не чіпаємо такі книги.
+    if path.suffix.lower() in {".xlsm", ".xlsb", ".xls"}:
+        return False
 
     if backup:
         backup_path = path.with_name(f"{path.stem}.backup{path.suffix}")
@@ -154,7 +157,11 @@ def write_estimate(
 
     workbook = load_workbook(path)  # не read_only — зберігаємо форматування
     try:
-        sheet = workbook[entry.sheet] if entry.sheet in workbook.sheetnames else workbook[workbook.sheetnames[0]]
+        # entry.row — абсолютний індекс рядка В СВОЄМУ аркуші. Якщо аркуш зник —
+        # НЕ пишемо в чужий лист (інакше затремо неповʼязані дані), а відмовляємось.
+        if entry.sheet not in workbook.sheetnames:
+            return False
+        sheet = workbook[entry.sheet]
         header_row = _find_header_row_ws(sheet)
         if header_row is None:
             return False
@@ -212,6 +219,11 @@ def _building_key(city: str | None, address: str | None) -> str:
     if not address:
         return ""
     return address_key(city=city, address=address, property_type=None)
+
+
+def normalize_apartment(value: Any) -> str:
+    """Публічна нормалізація № квартири (для звірки точного збігу ззовні)."""
+    return _norm_apartment(value)
 
 
 def _norm_apartment(value: Any) -> str:

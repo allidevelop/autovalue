@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -80,14 +82,20 @@ def _fetch(valcode: str, day: date) -> float | None:
         except Exception as exc:  # noqa: BLE001 — транзиентний збій → ретрай
             last_exc = exc
     else:
+        # Діагностика: фіксуємо причину збою (інакше None невідрізнюваний від «немає курсу»).
+        print(f"[nbu_rate] network failure for {day.isoformat()}: {last_exc}", file=sys.stderr)
         raise _NetworkError(str(last_exc)) from last_exc
     if isinstance(payload, list) and payload:
         rate = payload[0].get("rate") if isinstance(payload[0], dict) else None
         if rate is not None:
             try:
-                return float(rate)
+                value = float(rate)
             except (TypeError, ValueError):
                 return None
+            # Відкидаємо нереальні значення (0/від'ємне) — інакше market_value=0 з official=True.
+            if value <= 0:
+                return None
+            return value
     return None
 
 
@@ -103,7 +111,10 @@ def _load_cache() -> dict[str, Any]:
 def _save_cache(cache: dict[str, Any]) -> None:
     try:
         _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _CACHE_PATH.open("w", encoding="utf-8") as handle:
+        # Атомарний запис: temp у тій самій теці → os.replace, щоб краш не лишив битий JSON.
+        tmp = _CACHE_PATH.with_name(f"{_CACHE_PATH.name}.tmp")
+        with tmp.open("w", encoding="utf-8") as handle:
             json.dump(cache, handle, ensure_ascii=False, indent=0, sort_keys=True)
+        os.replace(tmp, _CACHE_PATH)
     except Exception:  # noqa: BLE001 — кеш не критичний для основного потоку
         pass

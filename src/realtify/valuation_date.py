@@ -23,6 +23,7 @@ class ValuationContext:
     rate_is_official: bool
     source: str  # 'explicit' | 'register' | 'cell' | 'today'
     matched_entry: RegisterEntry | None = None
+    apartment_verified: bool = False  # № квартири збігся точно (умова write-back у реєстр)
     notes: list[str] = field(default_factory=list)
 
 
@@ -61,6 +62,7 @@ def resolve_valuation_context(task: dict[str, Any], *, excel_path: Path | None =
     """
     target = task.get("target") if isinstance(task.get("target"), dict) else {}
     notes: list[str] = []
+    apartment_verified = False
 
     explicit = _parse_date(_first_not_empty(task.get("valuation_date"), target.get("valuation_date")))
     if explicit:
@@ -69,6 +71,17 @@ def resolve_valuation_context(task: dict[str, Any], *, excel_path: Path | None =
         register_date, entry = _resolve_from_register(task)
         if register_date and entry is not None:
             valuation_date, source = register_date, "register"
+            target_apt = valuation_register.normalize_apartment(
+                target.get("apartment_number") or target.get("apartment")
+            )
+            apartment_verified = bool(
+                target_apt and valuation_register.normalize_apartment(entry.apartment) == target_apt
+            )
+            if not apartment_verified:
+                notes.append(
+                    "Реєстр: № квартири не підтверджено точно — дату взято, "
+                    "але запис оцінки в реєстр пропущено (уникаю запису в чужий рядок)."
+                )
             notes.append(
                 f"Дата оцінки з реєстру: {register_date.strftime('%d.%m.%Y')} "
                 f"(кв. {entry.apartment or '?'}, {entry.address or '?'}"
@@ -105,6 +118,7 @@ def resolve_valuation_context(task: dict[str, Any], *, excel_path: Path | None =
         rate_is_official=rate_is_official,
         source=source,
         matched_entry=entry,
+        apartment_verified=apartment_verified,
         notes=notes,
     )
 
