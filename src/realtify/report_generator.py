@@ -118,12 +118,89 @@ def generate_word_report(
         warnings.append(f"resized_oversized_images: {resized_images}")
 
     document.save(str(output))
+    # Замінюємо статичні скани витяга/техпаспорта в шаблоні на сторінки ЦЬОГО об'єкта.
+    warnings.extend(_swap_object_document_scans(output, intake, task))
     return WordReportResult(
         output_path=output,
         replaced_placeholders=replaced,
         missing_placeholders=missing,
         warnings=warnings,
     )
+
+
+# Картинки шаблону valuation_report_real_template, що є сканами документів зразка
+# і заміняються сканом ПОТОЧНОГО об'єкта (вит’яг / техпаспорт).
+_DOC_SCAN_TARGETS = {"vityag": "word/media/image5.png", "techpassport": "word/media/image1.png"}
+
+
+def _swap_object_document_scans(output: Path, intake: IntakeResult | None, task: dict[str, Any]) -> list[str]:
+    """Рендерить сторінку витяга + сторінку техпаспорта об'єкта з PDF і підставляє
+    їх замість статичних сканів-зразків у шаблоні (за тим самим розміщенням)."""
+    import tempfile
+
+    if intake is None:
+        return ["object_scans_skipped_no_intake"]
+    src_pdf = _source_pdf(intake, task)
+    if not src_pdf or not src_pdf.exists():
+        return ["object_scans_no_source_pdf"]
+
+    se = intake.selected_extract
+    st = intake.selected_technical_passport
+    vityag_page = getattr(se, "page", None) if se else None
+    tech_pages = list(getattr(st, "pages", []) or []) if st else []
+    tech_page = tech_pages[0] if tech_pages else None
+
+    notes: list[str] = []
+    try:
+        from realtify.pdf_tools import render_pdf_pages
+
+        with tempfile.TemporaryDirectory(prefix="docscan_") as tmp:
+            tmpd = Path(tmp)
+            mapping: dict[str, Path] = {}
+            if vityag_page:
+                imgs = render_pdf_pages(src_pdf, tmpd / "v", first_page=vityag_page, last_page=vityag_page, dpi=160)
+                if imgs:
+                    mapping[_DOC_SCAN_TARGETS["vityag"]] = imgs[0]
+            if tech_page:
+                imgs = render_pdf_pages(src_pdf, tmpd / "t", first_page=tech_page, last_page=tech_page, dpi=160)
+                if imgs:
+                    mapping[_DOC_SCAN_TARGETS["techpassport"]] = imgs[0]
+            if not mapping:
+                return ["object_scans_no_pages"]
+            _replace_docx_media(output, mapping)
+            notes.append(f"object_scans_swapped: vityag=p{vityag_page}, techpass=p{tech_page}")
+    except Exception as exc:  # noqa: BLE001 — підміна сканів не повинна валити звіт
+        notes.append(f"object_scans_failed: {exc}")
+    return notes
+
+
+def _source_pdf(intake: IntakeResult, task: dict[str, Any]) -> Path | None:
+    candidates = [getattr(intake, "source_pdf", None)]
+    docs = task.get("documents") if isinstance(task, dict) else None
+    if isinstance(docs, dict):
+        candidates += [docs.get("extract_pdf"), docs.get("technical_passport_pdf")]
+    for c in candidates:
+        if c:
+            p = Path(str(c))
+            if p.exists():
+                return p
+    return None
+
+
+def _replace_docx_media(docx_path: Path, mapping: dict[str, Path]) -> None:
+    """Заміна байтів media-файлів у docx (zip) — той самий arcname, нові байти."""
+    import shutil
+    import zipfile
+
+    tmp = docx_path.with_suffix(".swap.docx")
+    with zipfile.ZipFile(docx_path, "r") as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            repl = mapping.get(item.filename)
+            if repl is not None and repl.exists():
+                data = repl.read_bytes()
+            zout.writestr(item, data)
+    shutil.move(str(tmp), str(docx_path))
 
 
 def build_report_values(
