@@ -141,6 +141,13 @@ def find_comparables(
             tier = "building"
             rows.extend(building)
 
+        # Об'єкт із PDF часто без назви ЖК — беремо ЖК із аналогів цього ж будинку,
+        # щоб коректно розширитись на весь ЖК (інші корпуси), а не падати в місто.
+        if not complex_name and building:
+            derived = next((r["complex_name"] for r in building if r["complex_name"]), None)
+            if derived:
+                complex_name = _norm(derived)
+
         # SQLite lower()/COLLATE NOCASE — лише ASCII; кирилицю нормалізуємо в Python.
         if len(rows) < min_count and complex_name:
             pool = conn.execute(
