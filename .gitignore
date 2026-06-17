@@ -33,3 +33,6 @@ client_test_files/*
 
 # analog cache (sqlite + screenshots)
 data/
+
+# local uv runs
+uv.lock
