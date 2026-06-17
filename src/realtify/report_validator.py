@@ -248,7 +248,12 @@ def _validate_candidate_links(
 def _validate_screenshots(candidates: list[Comparable], issues: list[ValidationIssue]) -> None:
     for index, candidate in enumerate(candidates[:5], start=1):
         if not candidate.screenshot_path:
-            _add_error(issues, "candidate_screenshot_missing", f"Candidate {index} has no screenshot path.", f"candidate {index}")
+            # Аналоги з курованої бази звітів — data-only (скриншот може бути відсутній);
+            # це не помилка, а попередження. Інакше валідний звіт із бази «падає».
+            if candidate.source_key == "report_archive":
+                _add_warning(issues, "candidate_screenshot_missing", f"Аналог {index} з бази — без скриншоту.", f"candidate {index}")
+            else:
+                _add_error(issues, "candidate_screenshot_missing", f"Candidate {index} has no screenshot path.", f"candidate {index}")
             continue
         screenshot = Path(candidate.screenshot_path)
         if not screenshot.exists():

@@ -170,9 +170,9 @@ def build_report_values(
     )
     address = _normalize_report_address(address)
     excel_payload = excel_values or {}
-    today = date.today()
-    report_date_obj = _parse_date(_first_not_empty(task.get("report_date"), target.get("report_date"))) or today
     valuation_date_obj = resolve_valuation_date(task=task, excel_path=excel_path)
+    # Дата складання звіту = дата оцінки (вимога клієнта), якщо явно не задано іншу.
+    report_date_obj = _parse_date(_first_not_empty(task.get("report_date"), target.get("report_date"))) or valuation_date_obj
     address_parts = _address_parts(address)
     rooms_text = _rooms_text(rooms)
     total_area_text = _format_decimal_comma(total_area)
