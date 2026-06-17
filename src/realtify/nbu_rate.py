@@ -21,6 +21,7 @@ from realtify.paths import PROJECT_ROOT
 NBU_EXCHANGE_URL = "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange"
 _CACHE_PATH = PROJECT_ROOT / "data" / "nbu_cache" / "rates.json"
 _TIMEOUT_SECONDS = 15
+_FETCH_ATTEMPTS = 3  # ретрай на транзиентний мережевий збій (холодний DNS/TLS)
 # На вихідні/свята НБУ не публікує нового курсу — крок назад до останнього опублікованого.
 _MAX_LOOKBACK_DAYS = 6
 
@@ -64,16 +65,22 @@ def usd_uah_rate(target_day: date, *, valcode: str = "USD") -> float | None:
 def _fetch(valcode: str, day: date) -> float | None:
     # `&json` — прапорець без значення (саме так очікує API НБУ).
     url = f"{NBU_EXCHANGE_URL}?valcode={valcode}&date={day.strftime('%Y%m%d')}&json"
-    try:
-        response = requests.get(
-            url,
-            timeout=_TIMEOUT_SECONDS,
-            headers={"User-Agent": "realtify-autovalue/1.0"},
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except Exception as exc:  # noqa: BLE001 — будь-який збій мережі/HTTP/JSON = network error
-        raise _NetworkError(str(exc)) from exc
+    last_exc: Exception | None = None
+    payload: Any = None
+    for _ in range(_FETCH_ATTEMPTS):
+        try:
+            response = requests.get(
+                url,
+                timeout=_TIMEOUT_SECONDS,
+                headers={"User-Agent": "realtify-autovalue/1.0"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            break
+        except Exception as exc:  # noqa: BLE001 — транзиентний збій → ретрай
+            last_exc = exc
+    else:
+        raise _NetworkError(str(last_exc)) from last_exc
     if isinstance(payload, list) and payload:
         rate = payload[0].get("rate") if isinstance(payload[0], dict) else None
         if rate is not None:
