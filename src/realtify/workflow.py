@@ -13,12 +13,13 @@ import yaml
 from rich.console import Console
 
 from realtify import analog_cache
+from realtify import report_db
 from realtify.candidate_selector import CandidateSelectionResult, save_selection_result, select_candidates
 from realtify.complex_search import resolve_complex_catalog_url
 from realtify.collect_from_links import CollectionResult, collect_from_links, read_links, save_collection_result
 from realtify.discover_links import DiscoveryResult, discover_links_for_task, save_discovery_result
 from realtify.fill_template import FillResult, fill_excel_template, load_template_profile
-from realtify.models import PropertyType, TransactionType
+from realtify.models import Comparable, PropertyType, TransactionType
 from realtify.paths import PROJECT_ROOT, RESOURCE_ROOT, ensure_output_dir
 from realtify.progress import ProgressCallback, emit_progress
 from realtify.source_config import load_sources_config
@@ -125,12 +126,48 @@ def run_excel_workflow(
         else None
     )
 
+    # ── База аналогів зі звітів (курована): шукаємо ПЕРЕД скрейпом ──
+    report_selected: list[Comparable] | None = None
+    if cache_key and not manual_links and not force_research:
+        try:
+            report_hits, tier = report_db.find_comparables(
+                target,
+                as_of_date=valuation.valuation_date,
+                min_count=required,
+                property_type=str(property_type),
+            )
+        except Exception as exc:  # noqa: BLE001 — база не повинна валити основний потік
+            report_hits, tier = [], "error"
+            emit_progress(progress, f"База звітів: помилка читання ({exc}).")
+        if report_hits and len(report_hits) >= required:
+            cfg = {
+                **collection_cfg,
+                "selection": {**(collection_cfg.get("selection") or {}), "require_screenshot": False},
+            }
+            sel = select_candidates(report_hits, target=target, collection_config=cfg, required_count=required)
+            if len(sel.selected_candidates) >= required:
+                report_selected = sel.selected_candidates[:required]
+                emit_progress(
+                    progress,
+                    f"База звітів: знайдено {len(report_hits)} аналогів ({tier}) — обрано "
+                    f"{len(report_selected)}, пропускаю пошук.",
+                )
+
     links_file: Path | None = manual_links
     discovery: DiscoveryResult | None = None
     collection: CollectionResult | None = None
     selection: CandidateSelectionResult | None = None
 
-    if cached and len(cached) >= required:
+    if report_selected:
+        selected_collection = CollectionResult(output_dir=out_dir, candidates=report_selected, errors=[])
+        links_file = out_dir / "candidates.json"
+        save_collection_result(
+            selected_collection,
+            links=[str(c.source_url) for c in report_selected],
+            candidates_filename="candidates.json",
+            report_filename="selected_candidates_report.md",
+        )
+    elif cached and len(cached) >= required:
         emit_progress(
             progress,
             "Кеш аналогів: адресу знайдено в базі — пропускаю пошук, "
@@ -243,6 +280,18 @@ def run_excel_workflow(
                 )
             except Exception as exc:  # noqa: BLE001 — кеш не повинен валити основний потік
                 emit_progress(progress, f"Кеш аналогів: не вдалося зберегти ({exc}).")
+            # Авто-поповнення курованої бази аналогів знайденим (для майбутніх оцінок + CRUD).
+            try:
+                stats = report_db.upsert_many([
+                    _comparable_to_report_row(c, target, str(property_type), valuation.valuation_date)
+                    for c in selected_collection.candidates
+                ])
+                emit_progress(
+                    progress,
+                    f"База аналогів: +{stats.get('inserted', 0)} нових, {stats.get('updated', 0)} оновлено.",
+                )
+            except Exception as exc:  # noqa: BLE001 — поповнення бази не валить потік
+                emit_progress(progress, f"База аналогів: не вдалося поповнити ({exc}).")
         elif cache_key and selected_collection.candidates:
             emit_progress(
                 progress,
@@ -523,6 +572,31 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _comparable_to_report_row(
+    candidate: Comparable, target: dict[str, Any], property_type: str, vdate: Any
+) -> dict[str, Any]:
+    """Comparable → рядок report_comparables (для авто-поповнення бази знайденим)."""
+    return {
+        "city": candidate.city or target.get("city"),
+        "address": candidate.address,
+        "complex_name": candidate.complex_name or target.get("complex_name"),
+        "property_type": property_type,
+        "area_m2": candidate.area_m2,
+        "price_usd": candidate.price_usd,
+        "price_per_m2_usd": candidate.price_per_m2_usd,
+        "floor_or_level": candidate.floor_or_level,
+        "rooms": candidate.rooms,
+        "location_quality": candidate.location_quality,
+        "building_class": candidate.building_class,
+        "condition": candidate.condition,
+        "delivery_date": candidate.delivery_date,
+        "listing_date": vdate.isoformat() if hasattr(vdate, "isoformat") else None,
+        "source_key": candidate.source_key or "scraped",
+        "report_id": None,
+        "source_url": str(candidate.source_url) if candidate.source_url else None,
+    }
 
 
 def _typed_property_type(value: Any) -> PropertyType:
