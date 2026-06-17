@@ -163,8 +163,8 @@ def health() -> dict[str, Any]:
 
 @app.post("/api/jobs")
 async def create_job(
-    pdf_file: UploadFile = File(...),
-    excel_template: UploadFile = File(...),
+    pdf_file: list[UploadFile] = File(...),
+    excel_template: UploadFile | None = File(None),
     word_template: UploadFile | None = File(None),
     links_file: UploadFile | None = File(None),
     profile: str = Form("apartment"),
@@ -185,13 +185,28 @@ async def create_job(
     input_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    pdf_path = input_dir / _safe_upload_name(pdf_file.filename, "input.pdf")
-    excel_path = input_dir / _safe_upload_name(excel_template.filename, "template.xls")
+    # Кілька PDF (витяг і техпаспорт можуть бути окремими сканами) → зливаємо в один.
+    pdf_inputs = [f for f in pdf_file if f and f.filename]
+    if not pdf_inputs:
+        raise HTTPException(status_code=400, detail="Потрібен щонайменше один PDF.")
+    saved_pdfs: list[Path] = []
+    for idx, item in enumerate(pdf_inputs):
+        part = input_dir / f"input_{idx:02d}_{_safe_upload_name(item.filename, 'doc.pdf')}"
+        await _save_upload(item, part)
+        saved_pdfs.append(part)
+    if len(saved_pdfs) == 1:
+        pdf_path = saved_pdfs[0]
+    else:
+        pdf_path = input_dir / "merged_input.pdf"
+        _merge_pdfs(saved_pdfs, pdf_path)
+
+    excel_path: Path | None = None
+    if excel_template and excel_template.filename:
+        excel_path = input_dir / _safe_upload_name(excel_template.filename, "template.xls")
+        await _save_upload(excel_template, excel_path)
     word_path: Path | None = None
     links_path: Path | None = None
 
-    await _save_upload(pdf_file, pdf_path)
-    await _save_upload(excel_template, excel_path)
     if word_template and word_template.filename:
         word_path = input_dir / _safe_upload_name(word_template.filename, "report_template.docx")
         await _save_upload(word_template, word_path)
@@ -400,7 +415,7 @@ def download_artifact(job_id: str, artifact_name: str) -> FileResponse:
 def _run_job(
     job_id: str,
     pdf_path: Path,
-    excel_path: Path,
+    excel_path: Path | None,
     word_path: Path,
     links_path: Path | None,
     profile: str,
@@ -419,7 +434,7 @@ def _run_job(
     _set_job(job_id, status="running", started_at=_now_iso())
     _append_event(job_id, "Запуск batch workflow: один отчет на каждый объект из PDF.")
     _append_event(job_id, f"PDF: {pdf_path.name}")
-    _append_event(job_id, f"Excel template: {excel_path.name}")
+    _append_event(job_id, f"Excel template: {excel_path.name if excel_path else 'дефолтний (вбудований)'}")
     _append_event(job_id, f"Word template: {word_path.name}")
     _append_event(job_id, f"Profile: {profile}; required analogs: {required_count}")
     if force_research:
@@ -515,6 +530,20 @@ async def _save_upload(upload: UploadFile, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("wb") as handle:
         shutil.copyfileobj(upload.file, handle)
+
+
+def _merge_pdfs(parts: list[Path], dest: Path) -> None:
+    """Зливає кілька PDF в один (наскрізна нумерація сторінок) — для окремих сканів."""
+    from pypdf import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    for part in parts:
+        reader = PdfReader(str(part))
+        for page in reader.pages:
+            writer.add_page(page)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with dest.open("wb") as handle:
+        writer.write(handle)
 
 
 def _safe_upload_name(filename: str | None, fallback: str) -> str:

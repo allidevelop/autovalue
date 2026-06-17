@@ -52,7 +52,7 @@ def run_batch_workflow(
     *,
     pdf_path: Path,
     links_path: Path | None,
-    template_path: Path,
+    template_path: Path | None = None,
     output_dir: Path | None = None,
     profile: str = "apartment",
     complex_name: str | None = None,
@@ -72,7 +72,7 @@ def run_batch_workflow(
 ) -> BatchWorkflowResult:
     pdf_file = _resolve_path(pdf_path)
     links_file = _resolve_path(links_path) if links_path else None
-    template_file = _resolve_path(template_path)
+    template_file = _resolve_path(template_path) if template_path else None
     out_dir = _resolve_path(output_dir) if output_dir else _default_batch_output_dir(pdf_file)
     out_dir.mkdir(parents=True, exist_ok=True)
 

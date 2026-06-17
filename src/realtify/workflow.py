@@ -70,7 +70,14 @@ def run_excel_workflow(
 
     template_path = _optional_path(template.get("path"))
     if not template_path:
-        raise WorkflowError("task.template.path is required")
+        # Шаблон більше не вантажиться користувачем — беремо штатний дефолтний.
+        default_tmpl = RESOURCE_ROOT / "config" / "default_templates" / f"{profile.profile}.xls"
+        if default_tmpl.exists():
+            template_path = default_tmpl
+        else:
+            raise WorkflowError(
+                f"task.template.path is required (і не знайдено дефолтний шаблон {default_tmpl})"
+            )
     template_path = _resolve_path(template_path)
 
     sources_path = _optional_path(collection_cfg.get("sources_config"))
