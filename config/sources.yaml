@@ -86,11 +86,15 @@ sources:
       - "www.olx.ua"
     modes:
       - "direct_link"
+      - "search_url"
       - "google_discovery"
     listing_url_patterns:
       - "/d/uk/obyavlenie/"
       - "/d/obyavlenie/"
-    notes: "Disabled by default because anti-bot/captcha behavior is common."
+    search_url_templates:
+      apartment_sale:
+        - "https://www.olx.ua/uk/nedvizhimost/kvartiry/prodazha-kvartir/{city_slug}/"
+    notes: "Публічного API для читання ринку немає — лише скрейпінг. Вимкнено за замовчуванням (anti-bot/captcha). Вмикати вручну (opt-in), з обережністю; generic-екстрактор, може потребувати стелс/тюнінгу."
 
   real_estate_lviv:
     enabled: true
@@ -106,8 +110,10 @@ sources:
     listing_url_patterns:
       - "/продаж-квартир/"
       - "/prodazh-kvartyr/"
-      - "/"
-    notes: "Local Lviv real estate source; start with direct links and screenshots. The site may return 403 to automated browsers, in which case the collector keeps the screenshot as an error and does not use it as a candidate."
+    search_url_templates:
+      apartment_sale:
+        - "https://www.real-estate.lviv.ua/продаж-квартир/місто-львів"
+    notes: "Local Lviv real estate source (Lviv-only catalog). Generic extractor; may return 403 to automated browsers, in which case the collector keeps the screenshot as an error and does not use it as a candidate. Listing-pattern/extractor may need tuning."
 
   developer_or_agency:
     enabled: true
