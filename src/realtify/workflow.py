@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -20,7 +21,8 @@ from realtify.models import PropertyType, TransactionType
 from realtify.paths import PROJECT_ROOT, RESOURCE_ROOT, ensure_output_dir
 from realtify.progress import ProgressCallback, emit_progress
 from realtify.source_config import load_sources_config
-from realtify.valuation_date import resolve_valuation_context
+from realtify import valuation_register
+from realtify.valuation_date import ValuationContext, resolve_valuation_context
 
 
 class WorkflowError(RuntimeError):
@@ -232,6 +234,7 @@ def run_excel_workflow(
             nbu_rate=valuation.nbu_rate,
         )
         emit_progress(progress, f"Excel-шаблон заповнено: {excel_result.output_path}")
+        _writeback_estimate_to_register(task, valuation, excel_result, progress=progress)
     except Exception as exc:
         fill_error = str(exc)
         if not allow_less and len(selected_collection.candidates) < required:
@@ -377,6 +380,68 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise WorkflowError(f"{path} must contain a YAML object")
     return data
+
+
+def _writeback_estimate_to_register(
+    task: dict[str, Any],
+    valuation: ValuationContext,
+    excel_result: FillResult,
+    *,
+    progress: ProgressCallback | None,
+) -> None:
+    """Записує посчитану оцінку в окремі колонки реєстру (рядок зматченого об'єкта)."""
+    entry = valuation.matched_entry
+    if entry is None or not _writeback_enabled(task):
+        return
+    register_path = valuation_register.register_path_from_task(task)
+    if not register_path:
+        return
+    estimate = _read_market_value(excel_result)
+    if estimate is None:
+        emit_progress(progress, "Реєстр: оцінку не записано — не вдалося прочитати market_value з розрахунку.")
+        return
+    try:
+        written = valuation_register.write_estimate(
+            register_path,
+            entry,
+            estimate_uah=estimate,
+            nbu_rate=valuation.nbu_rate,
+            calc_date=datetime.now().date(),
+        )
+    except Exception as exc:  # noqa: BLE001 — запис у реєстр не повинен валити оцінку
+        emit_progress(progress, f"Реєстр: не вдалося записати оцінку ({exc}).")
+        return
+    if written:
+        amount = f"{estimate:,.0f}".replace(",", " ")
+        emit_progress(
+            progress,
+            f"Реєстр: записано оцінку {amount} грн у рядок кв. {entry.apartment or '?'} "
+            f"(аркуш «{entry.sheet}», р.{entry.row}); клієнтську «Ціна продажу» не змінено.",
+        )
+
+
+def _writeback_enabled(task: dict[str, Any]) -> bool:
+    if os.environ.get("REALTIFY_REGISTER_WRITEBACK", "1").strip().lower() in ("0", "false", "no", "off"):
+        return False
+    valuation_cfg = task.get("valuation") if isinstance(task.get("valuation"), dict) else {}
+    flag = valuation_cfg.get("writeback")
+    return True if flag is None else bool(flag)
+
+
+def _read_market_value(excel_result: FillResult) -> float | None:
+    meta = excel_result.metadata_path
+    if not meta:
+        return None
+    try:
+        with open(meta, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        summary = payload.get("summary") or {}
+        value = summary.get("market_value_uah_rounded")
+        if value is None:
+            value = summary.get("market_value_uah")
+        return float(value) if value is not None else None
+    except Exception:  # noqa: BLE001 — відсутній/битий сайдкар → нічого писати
+        return None
 
 
 def _section(task: dict[str, Any], name: str) -> dict[str, Any]:

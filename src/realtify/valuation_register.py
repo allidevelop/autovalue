@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -19,6 +20,13 @@ from realtify.analog_cache import address_key
 from realtify.paths import PROJECT_ROOT
 
 ENV_REGISTER_PATH = "REALTIFY_VALUATION_REGISTER"
+
+# Куди писати результат розрахунку — окремі колонки, без зачіпання клієнтської «Ціна продажу».
+RESULT_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("Оцінка системи, грн", "estimate"),
+    ("Курс НБУ", "rate"),
+    ("Дата розрахунку", "calc_date"),
+)
 
 # Гнучке зіставлення заголовків колонок (укр/рос/en).
 _HEADER_ALIASES: dict[str, tuple[str, ...]] = {
@@ -115,7 +123,81 @@ def find_entry(
     return same_building[0] if len(same_building) == 1 else None
 
 
+def write_estimate(
+    path: Path,
+    entry: RegisterEntry,
+    *,
+    estimate_uah: float | None,
+    nbu_rate: float | None,
+    calc_date: date,
+    backup: bool = True,
+) -> bool:
+    """Записує результат оцінки в окремі колонки реєстру (рядок entry.row).
+
+    НЕ чіпає клієнтську «Ціна продажу». Перед першим записом робить .backup-копію.
+    Повертає True, якщо записано й збережено.
+    """
+    try:
+        from openpyxl import load_workbook
+    except Exception:  # noqa: BLE001 — без openpyxl запис недоступний
+        return False
+    if not path.exists():
+        return False
+
+    if backup:
+        backup_path = path.with_name(f"{path.stem}.backup{path.suffix}")
+        if not backup_path.exists():
+            try:
+                shutil.copy2(path, backup_path)
+            except Exception:  # noqa: BLE001 — бекап не критичний для запису
+                pass
+
+    workbook = load_workbook(path)  # не read_only — зберігаємо форматування
+    try:
+        sheet = workbook[entry.sheet] if entry.sheet in workbook.sheetnames else workbook[workbook.sheetnames[0]]
+        header_row = _find_header_row_ws(sheet)
+        if header_row is None:
+            return False
+
+        existing: dict[str, int] = {}
+        for col in range(1, sheet.max_column + 1):
+            value = sheet.cell(header_row, col).value
+            if value not in (None, ""):
+                existing[str(value).strip()] = col
+
+        col_for: dict[str, int] = {}
+        next_col = sheet.max_column + 1
+        for header, key in RESULT_COLUMNS:
+            if header in existing:
+                col_for[key] = existing[header]
+            else:
+                sheet.cell(header_row, next_col, header)
+                col_for[key] = next_col
+                next_col += 1
+
+        if estimate_uah is not None:
+            sheet.cell(entry.row, col_for["estimate"], round(float(estimate_uah), 2))
+        if nbu_rate is not None:
+            sheet.cell(entry.row, col_for["rate"], round(float(nbu_rate), 4))
+        sheet.cell(entry.row, col_for["calc_date"], calc_date)
+
+        workbook.save(path)
+        return True
+    finally:
+        workbook.close()
+
+
 # ── допоміжне ──────────────────────────────────────────────────────────────
+
+
+def _find_header_row_ws(sheet: Any) -> int | None:
+    max_col = min(sheet.max_column, 64)
+    for row_number in range(1, 7):
+        row = tuple(sheet.cell(row_number, col).value for col in range(1, max_col + 1))
+        mapping = _match_header_row(row)
+        if mapping and "date" in mapping and "address" in mapping:
+            return row_number
+    return None
 
 def _resolve_path(raw: Any) -> Path | None:
     if not raw:
