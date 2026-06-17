@@ -122,7 +122,7 @@ def find_comparables(
         city=target.get("city"),
         address=target.get("address"),
         property_type=ptype,
-        complex_name=target.get("complex_name"),
+        complex_name=None,  # ключ будинку без ЖК (узгоджено зі стороною імпорту)
     )
     complex_name = _norm(target.get("complex_name"))
     city = _norm(target.get("city"))
@@ -150,8 +150,7 @@ def find_comparables(
             have = {x["id"] for x in rows}
             new = [r for r in pool if _norm(r["complex_name"]) == complex_name and r["id"] not in have]
             if new:
-                if not building:
-                    tier = "complex"
+                tier = "complex"  # розширення = найширший досягнутий рівень
                 rows.extend(new)
 
         if len(rows) < min_count and city:
@@ -162,8 +161,7 @@ def find_comparables(
             have = {x["id"] for x in rows}
             new = [r for r in pool if _norm(r["city"]) == city and r["id"] not in have]
             if new:
-                if not rows:
-                    tier = "city"
+                tier = "city"
                 rows.extend(new)
     finally:
         conn.close()
@@ -279,11 +277,13 @@ def _normalize_row(raw: dict[str, Any], *, recompute_key: bool = False) -> dict[
         row["price_per_m2_usd"] = round(row["price_usd"] / row["area_m2"], 2)
     row["rooms"] = _to_int(row.get("rooms"))
     row["property_type"] = str(row.get("property_type") or "apartment")
-    if recompute_key or not row.get("address_key"):
-        row["address_key"] = address_key(
-            city=row.get("city"), address=row.get("address"),
-            property_type=row["property_type"], complex_name=row.get("complex_name"),
-        )
+    # Ключ ЛИШЕ за вулицею+будинком (без ЖК) — об'єкт із PDF часто не має назви ЖК,
+    # тож включення complex_name у ключ ламало б точний матчинг будинку. ЖК — окрема
+    # колонка для розширення.
+    row["address_key"] = address_key(
+        city=row.get("city"), address=row.get("address"),
+        property_type=row["property_type"], complex_name=None,
+    )
     if not row.get("source_url"):
         row["source_url"] = "https://report.local/manual"
     if not row.get("source_key"):
