@@ -105,12 +105,17 @@ def parse_report(docx_path: Path, *, report_id: str) -> ParsedReport:
     n_cols = max((len(r.cells) for r in table.rows), default=0)
     # Колонки 1..n-2 = аналоги; остання колонка = об'єкт оцінки (пропускаємо).
     comparable_cols = list(range(1, max(1, n_cols - 1)))
-    rasters = _extract_analog_images(docx_path)  # скриншоти аналогів у порядку колонок
+    rasters = _extract_analog_images(docx_path)  # [(bytes, listing_url), ...] у порядку документа
+    url_index: dict[str, int] = {}
+    for i, (_data, url) in enumerate(rasters):
+        lid = _listing_id(url)
+        if lid:
+            url_index.setdefault(lid, i)
     for col in comparable_cols:
         rec = _build_record(table, labels, col, report_id, city, report_date)
         if rec is None:
             continue
-        _attach_screenshot(rec, rasters, col)
+        _attach_screenshot(rec, rasters, url_index, col)
         parsed.rows.append(rec)
         if rec.get("complex_name"):
             parsed.complexes.add(str(rec["complex_name"]).lower())
@@ -127,15 +132,15 @@ _LISTING_SIGNALS = (
 )
 
 
-def _extract_analog_images(docx_path: Path, *, min_size: int = 40_000, limit: int = 8) -> list[bytes]:
-    """Скриншоти аналогів зі звіту — у порядку документа (= порядок колонок
-    таблиці-порівняння). Аналог визначається не розміром/позицією (перші великі
-    растри — це вступні фото/мапа), а ЛІСТИНГ-СИГНАЛОМ у підписі під зображенням
-    (домен оголошень або «Продаж квартир»/«Оголошення №»). Валідовано на корпусі:
-    рівно 5 на звіт, збігається з реальними URL колонок."""
+def _extract_analog_images(docx_path: Path, *, min_size: int = 40_000, limit: int = 8) -> list[tuple[bytes, str]]:
+    """Скриншоти аналогів зі звіту — (байти, URL_оголошення) у порядку документа.
+    Аналог визначається не розміром/позицією (перші великі растри — це вступні
+    фото/мапа), а ЛІСТИНГ-СИГНАЛОМ у підписі під зображенням (домен оголошень або
+    «Продаж квартир»/«Оголошення №»). URL з підпису дає змогу прив'язувати скрин до
+    колонки за ID оголошення (а не лише позиційно). Корпус: 5/звіт у 184/187."""
     import zipfile
 
-    out: list[bytes] = []
+    out: list[tuple[bytes, str]] = []
     try:
         with zipfile.ZipFile(docx_path) as z:
             doc = z.read("word/document.xml").decode("utf-8", "ignore")
@@ -168,7 +173,8 @@ def _extract_analog_images(docx_path: Path, *, min_size: int = 40_000, limit: in
                     continue
                 if len(data) < min_size:
                     continue
-                out.append(data)
+                m = re.search(r"https?://[^\s<>\"]+", following[:300])
+                out.append((data, m.group(0) if m else ""))
                 if len(out) >= limit:
                     break
     except Exception:  # noqa: BLE001 — відсутність скринів не валить імпорт даних
@@ -176,18 +182,37 @@ def _extract_analog_images(docx_path: Path, *, min_size: int = 40_000, limit: in
     return out
 
 
-def _attach_screenshot(rec: dict[str, Any], rasters: list[bytes], col: int) -> None:
-    """Скриншот для аналога колонки `col` = (col-1)-й растр у порядку документа."""
-    idx = col - 1
+def _listing_id(url: str | None) -> str:
+    """ID оголошення з URL (остання послідовність ≥5 цифр у шляху, без query)."""
+    if not url:
+        return ""
+    path = str(url).split("?")[0]
+    nums = re.findall(r"\d{5,}", path)
+    return nums[-1] if nums else ""
+
+
+def _attach_screenshot(
+    rec: dict[str, Any], rasters: list[tuple[bytes, str]], url_index: dict[str, int], col: int
+) -> None:
+    """Прив'язка скрина до аналога: спершу за ID оголошення (URL колонки ↔ URL у
+    підписі скрина), якщо колонка має реальний URL; інакше — позиційно (col-1).
+    Це виправляє нечасту перестановку скринів між колонками (корпус: 8/652)."""
+    idx: int | None = None
+    src = str(rec.get("source_url") or "")
+    if src.startswith("http") and "report.local" not in src:
+        idx = url_index.get(_listing_id(src))
+    if idx is None:
+        idx = col - 1
     if not 0 <= idx < len(rasters):
         return
+    data, _url = rasters[idx]
     ak = address_key(
         city=rec.get("city"), address=rec.get("address"),
         property_type=rec.get("property_type") or "apartment", complex_name=None,
     )
     dk = report_db.compute_dedup_key(ak, rec.get("area_m2"), rec.get("price_usd"), rec.get("floor_or_level"))
     try:
-        rec["screenshot_path"] = str(report_db.store_screenshot(dk, rasters[idx]))
+        rec["screenshot_path"] = str(report_db.store_screenshot(dk, data))
     except Exception:  # noqa: BLE001
         pass
 
