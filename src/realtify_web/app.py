@@ -659,7 +659,9 @@ def _web_pdf_dpi() -> int:
                 return value
         except ValueError:
             pass
-    return 110
+    # 110 dpi занадто мало для дрібного тексту витяга (OCR плутав вулицю/площу,
+    # напр. «Ростиславська»→«Ростполавська»). 200 dpi — надійне розпізнавання.
+    return 200
 
 
 def _notify_job_finished(job_id: str) -> None:
