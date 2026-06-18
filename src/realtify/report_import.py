@@ -215,7 +215,7 @@ def _attach_screenshot(
         idx = col - 1  # синтетичний URL (підпис без посилання) — позиційний фолбек (~99%)
     if idx is None or not 0 <= idx < len(rasters):
         return
-    data, _url = rasters[idx]
+    data, raster_url = rasters[idx]
     ak = address_key(
         city=rec.get("city"), address=rec.get("address"),
         property_type=rec.get("property_type") or "apartment", complex_name=None,
@@ -225,6 +225,11 @@ def _attach_screenshot(
         rec["screenshot_path"] = str(report_db.store_screenshot(dk, data))
     except Exception:  # noqa: BLE001
         pass
+    # URL аналога = URL із підпису скрина (надійніше за колонку «джерело», де
+    # бувають синтетичні report.local і дублі). Тоді посилання в таблиці звіту
+    # збігається саме з тим оголошенням, що на скриншоті.
+    if raster_url and raster_url.startswith("http"):
+        rec["source_url"] = raster_url
 
 
 # ── парсинг таблиці ──────────────────────────────────────────────────────────
