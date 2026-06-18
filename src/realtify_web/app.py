@@ -368,6 +368,74 @@ def analogs_delete(item_id: int) -> dict[str, Any]:
     return {"deleted": report_db.delete(item_id)}
 
 
+@app.post("/api/analogs/{item_id}/screenshot")
+async def analogs_screenshot_upload(item_id: int, file: UploadFile = File(...)) -> dict[str, Any]:
+    from realtify import report_db
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty file")
+    item = report_db.set_item_screenshot(item_id, data)
+    if item is None:
+        raise HTTPException(status_code=404, detail="analog not found")
+    return {"item": item}
+
+
+@app.post("/api/analogs/from-url")
+async def analogs_from_url(request: Request) -> dict[str, Any]:
+    """Додати аналог за посиланням: скрейпимо оголошення (скрін + поля) і пишемо в базу."""
+    import tempfile
+    from pathlib import Path as _Path
+
+    from starlette.concurrency import run_in_threadpool
+
+    from realtify import report_db
+    from realtify.collect_from_links import collect_from_links
+    from realtify.source_config import load_sources_config
+
+    payload = await request.json()
+    url = str(payload.get("url") or "").strip()
+    if not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="valid url required")
+
+    sources = load_sources_config()
+    with tempfile.TemporaryDirectory(prefix="analog_url_") as tmp:
+        result = await run_in_threadpool(
+            lambda: collect_from_links(
+                [url], output_dir=_Path(tmp), sources_config=sources, property_type="apartment"
+            )
+        )
+        if not result.candidates:
+            err = result.errors[0]["error"] if result.errors else "no data extracted"
+            raise HTTPException(status_code=422, detail=f"scrape failed: {err}")
+        cand = result.candidates[0]
+        img = cand.report_image_path or cand.screenshot_path
+        data = _Path(str(img)).read_bytes() if img and _Path(str(img)).exists() else None
+
+    row = {
+        "city": cand.city or payload.get("city"),
+        "address": cand.address,
+        "complex_name": cand.complex_name or payload.get("complex_name"),
+        "property_type": "apartment",
+        "area_m2": cand.area_m2,
+        "price_usd": cand.price_usd,
+        "price_per_m2_usd": cand.price_per_m2_usd,
+        "floor_or_level": cand.floor_or_level,
+        "rooms": cand.rooms,
+        "location_quality": cand.location_quality,
+        "building_class": cand.building_class,
+        "condition": cand.condition,
+        "delivery_date": cand.delivery_date,
+        "source_key": cand.source_key or "scraped",
+        "source_url": str(cand.source_url) if cand.source_url else url,
+    }
+    item = report_db.create(row)
+    if data and item.get("id"):
+        updated = report_db.set_item_screenshot(int(item["id"]), data)
+        if updated:
+            item = updated
+    return {"item": item}
+
+
 @app.get("/api/analogs/{item_id}/screenshot")
 def analogs_screenshot(item_id: int) -> FileResponse:
     from realtify import report_db

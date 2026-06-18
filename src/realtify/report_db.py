@@ -297,6 +297,25 @@ def delete(item_id: int) -> bool:
         conn.close()
 
 
+def set_item_screenshot(item_id: int, data: bytes) -> dict[str, Any] | None:
+    """Зберігає завантажений/зібраний скрин для аналога й оновлює screenshot_path.
+    Ключ файлу — за id рядка (стабільний при повторному завантаженні/редагуванні)."""
+    path = store_screenshot(f"item-{item_id}", data)
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            "UPDATE report_comparables SET screenshot_path = ?, updated_at = ? WHERE id = ?",
+            (str(path), now, item_id),
+        )
+        conn.commit()
+        if cur.rowcount == 0:
+            return None
+    finally:
+        conn.close()
+    return get(item_id)
+
+
 # ── допоміжне ────────────────────────────────────────────────────────────────
 
 def _normalize_row(raw: dict[str, Any], *, recompute_key: bool = False) -> dict[str, Any]:
