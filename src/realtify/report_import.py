@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from realtify import report_db
+from realtify.analog_cache import address_key
 from realtify.excel_tools import libreoffice_path
 
 _UA_MONTHS = {
@@ -104,16 +105,66 @@ def parse_report(docx_path: Path, *, report_id: str) -> ParsedReport:
     n_cols = max((len(r.cells) for r in table.rows), default=0)
     # Колонки 1..n-2 = аналоги; остання колонка = об'єкт оцінки (пропускаємо).
     comparable_cols = list(range(1, max(1, n_cols - 1)))
+    rasters = _extract_analog_images(docx_path)  # скриншоти аналогів у порядку колонок
     for col in comparable_cols:
         rec = _build_record(table, labels, col, report_id, city, report_date)
         if rec is None:
             continue
+        _attach_screenshot(rec, rasters, col)
         parsed.rows.append(rec)
         if rec.get("complex_name"):
             parsed.complexes.add(str(rec["complex_name"]).lower())
     if not parsed.rows:
         parsed.warnings.append("no_valid_comparable_columns")
     return parsed
+
+
+def _extract_analog_images(docx_path: Path, *, min_size: int = 80_000, limit: int = 8) -> list[bytes]:
+    """Скриншоти аналогів зі звіту — перші великі растрові зображення у порядку
+    документа (= порядок колонок таблиці-порівняння). WMF-формули й дрібні лого
+    відсіюються (vector/малий розмір). Звіти з цього шаблону НЕ містять сканів
+    витяга/техпаспорта як зображень, тож перші N растрів = саме аналоги."""
+    import zipfile
+
+    out: list[bytes] = []
+    try:
+        with zipfile.ZipFile(docx_path) as z:
+            doc = z.read("word/document.xml").decode("utf-8", "ignore")
+            rels = z.read("word/_rels/document.xml.rels").decode("utf-8", "ignore")
+            rid2t = dict(re.findall(r'Id="([^"]+)"[^>]*Target="([^"]+)"', rels))
+            for m in re.finditer(r'<a:blip[^>]*r:embed="([^"]+)"', doc):
+                tgt = rid2t.get(m.group(1), "")
+                if not tgt.lower().split("/")[-1].endswith((".png", ".jpg", ".jpeg")):
+                    continue
+                arc = tgt if tgt.startswith("word/") else "word/" + tgt.lstrip("./")
+                try:
+                    data = z.read(arc)
+                except KeyError:
+                    continue
+                if len(data) < min_size:
+                    continue
+                out.append(data)
+                if len(out) >= limit:
+                    break
+    except Exception:  # noqa: BLE001 — відсутність скринів не валить імпорт даних
+        return out
+    return out
+
+
+def _attach_screenshot(rec: dict[str, Any], rasters: list[bytes], col: int) -> None:
+    """Скриншот для аналога колонки `col` = (col-1)-й растр у порядку документа."""
+    idx = col - 1
+    if not 0 <= idx < len(rasters):
+        return
+    ak = address_key(
+        city=rec.get("city"), address=rec.get("address"),
+        property_type=rec.get("property_type") or "apartment", complex_name=None,
+    )
+    dk = report_db.compute_dedup_key(ak, rec.get("area_m2"), rec.get("price_usd"), rec.get("floor_or_level"))
+    try:
+        rec["screenshot_path"] = str(report_db.store_screenshot(dk, rasters[idx]))
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ── парсинг таблиці ──────────────────────────────────────────────────────────

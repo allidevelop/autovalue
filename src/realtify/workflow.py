@@ -603,7 +603,27 @@ def _comparable_to_report_row(
         "source_key": candidate.source_key or "scraped",
         "report_id": None,
         "source_url": str(candidate.source_url) if candidate.source_url else None,
+        "screenshot_path": _store_candidate_screenshot(candidate, target, property_type),
     }
+
+
+def _store_candidate_screenshot(candidate: Comparable, target: dict[str, Any], property_type: str) -> str | None:
+    """Зберігає скриншот знайденого аналога в сховищі бази (за dedup_key)."""
+    img = candidate.report_image_path or candidate.screenshot_path
+    if not img:
+        return None
+    path = Path(str(img))
+    if not path.exists():
+        return None
+    ak = analog_cache.address_key(
+        city=candidate.city or target.get("city"), address=candidate.address,
+        property_type=property_type, complex_name=None,
+    )
+    dk = report_db.compute_dedup_key(ak, candidate.area_m2, candidate.price_usd, candidate.floor_or_level)
+    try:
+        return str(report_db.store_screenshot(dk, path.read_bytes()))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _typed_property_type(value: Any) -> PropertyType:

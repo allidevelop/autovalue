@@ -120,6 +120,8 @@ def generate_word_report(
     document.save(str(output))
     # Замінюємо статичні скани витяга/техпаспорта в шаблоні на сторінки ЦЬОГО об'єкта.
     warnings.extend(_swap_object_document_scans(output, intake, task))
+    # Замінюємо зразкові скриншоти 5 аналогів на скриншоти відібраних аналогів.
+    warnings.extend(_swap_analog_screenshots(output, candidates))
     return WordReportResult(
         output_path=output,
         replaced_placeholders=replaced,
@@ -131,6 +133,34 @@ def generate_word_report(
 # Картинки шаблону valuation_report_real_template, що є сканами документів зразка
 # і заміняються сканом ПОТОЧНОГО об'єкта (вит’яг / техпаспорт).
 _DOC_SCAN_TARGETS = {"vityag": "word/media/image5.png", "techpassport": "word/media/image1.png"}
+
+# Статичні скриншоти 5 аналогів-зразків у шаблоні (порядок документа = аналог 1→5).
+_ANALOG_SLOTS = (
+    "word/media/image14.png", "word/media/image13.png", "word/media/image11.png",
+    "word/media/image12.png", "word/media/image9.png",
+)
+
+
+def _swap_analog_screenshots(output: Path, candidates: list[Comparable]) -> list[str]:
+    """Підставляє скриншоти ВІДІБРАНИХ аналогів замість зразкових у шаблоні
+    (аналог i → слот i). Кандидати без скриншота лишають зразок шаблону."""
+    notes: list[str] = []
+    try:
+        mapping: dict[str, Path] = {}
+        aspects: dict[str, float] = {}
+        for i, cand in enumerate(candidates[: len(_ANALOG_SLOTS)]):
+            img = cand.report_image_path or cand.screenshot_path
+            path = Path(str(img)) if img else None
+            if path and path.exists():
+                mapping[_ANALOG_SLOTS[i]] = path
+                aspects[_ANALOG_SLOTS[i]] = _image_aspect(path)
+        if mapping:
+            _replace_docx_media(output, mapping)
+            _fit_media_drawings(output, aspects)
+            notes.append(f"analog_screens_swapped: {len(mapping)}/{min(len(_ANALOG_SLOTS), len(candidates))}")
+    except Exception as exc:  # noqa: BLE001 — підміна скринів не валить звіт
+        notes.append(f"analog_screens_failed: {exc}")
+    return notes
 
 
 def _swap_object_document_scans(output: Path, intake: IntakeResult | None, task: dict[str, Any]) -> list[str]:

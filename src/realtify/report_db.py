@@ -24,8 +24,23 @@ FIELDS: tuple[str, ...] = (
     "address_key", "city", "address", "complex_name", "property_type",
     "area_m2", "price_usd", "price_per_m2_usd", "floor_or_level", "rooms",
     "location_quality", "building_class", "condition", "delivery_date",
-    "listing_date", "source_key", "report_id", "source_url",
+    "listing_date", "source_key", "report_id", "source_url", "screenshot_path",
 )
+
+# Скриншоти аналогів (із звітів/скрейпу) — поряд із БД, ім'я = хеш dedup_key.
+SCREENSHOT_DIR = DB_PATH.parent / "screenshots"
+
+
+def store_screenshot(dedup_key: str, data: bytes) -> Path:
+    """Зберігає байти скриншота аналога під стабільним іменем (за dedup_key)."""
+    import hashlib
+
+    SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    ext = ".jpg" if data[:2] == b"\xff\xd8" else ".png"
+    name = hashlib.sha1(dedup_key.encode("utf-8")).hexdigest()[:20] + ext
+    path = SCREENSHOT_DIR / name
+    path.write_bytes(data)
+    return path
 
 
 def _connect() -> sqlite3.Connection:
@@ -55,6 +70,7 @@ def _connect() -> sqlite3.Connection:
             source_key       TEXT,
             report_id        TEXT,
             source_url       TEXT,
+            screenshot_path  TEXT,
             created_at       TEXT,
             updated_at       TEXT
         )
@@ -62,6 +78,10 @@ def _connect() -> sqlite3.Connection:
     )
     for col in ("address_key", "complex_name", "city"):
         conn.execute(f"CREATE INDEX IF NOT EXISTS ix_rc_{col} ON report_comparables({col})")
+    # міграція наявних БД: додати screenshot_path, якщо колонки ще немає
+    have = {r[1] for r in conn.execute("PRAGMA table_info(report_comparables)")}
+    if "screenshot_path" not in have:
+        conn.execute("ALTER TABLE report_comparables ADD COLUMN screenshot_path TEXT")
     return conn
 
 
@@ -83,7 +103,12 @@ def upsert_many(rows: list[dict[str, Any]]) -> dict[str, int]:
         for raw in rows:
             row = _normalize_row(raw)
             dedup = compute_dedup_key(row["address_key"], row["area_m2"], row["price_usd"], row["floor_or_level"])
-            existing = conn.execute("SELECT id FROM report_comparables WHERE dedup_key = ?", (dedup,)).fetchone()
+            existing = conn.execute(
+                "SELECT id, screenshot_path FROM report_comparables WHERE dedup_key = ?", (dedup,)
+            ).fetchone()
+            # не затирати наявний скриншот порожнім значенням із іншого звіту
+            if existing and existing["screenshot_path"] and not row.get("screenshot_path"):
+                row["screenshot_path"] = existing["screenshot_path"]
             cols = list(FIELDS)
             values = [row.get(c) for c in cols]
             if existing:
@@ -321,6 +346,8 @@ def _row_to_comparable(row: sqlite3.Row) -> Comparable:
         "building_class": row["building_class"],
         "condition": row["condition"],
         "delivery_date": row["delivery_date"],
+        "report_image_path": row["screenshot_path"] or None,
+        "screenshot_path": row["screenshot_path"] or None,
         "collected_at": collected,
     })
 
