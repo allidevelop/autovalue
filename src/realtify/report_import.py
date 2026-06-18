@@ -197,12 +197,16 @@ def _attach_screenshot(
     """Прив'язка скрина до аналога: спершу за ID оголошення (URL колонки ↔ URL у
     підписі скрина), якщо колонка має реальний URL; інакше — позиційно (col-1).
     Це виправляє нечасту перестановку скринів між колонками (корпус: 8/652)."""
-    idx: int | None = None
     src = str(rec.get("source_url") or "")
     if src.startswith("http") and "report.local" not in src:
+        # Реальний URL колонки: беремо ЛИШЕ скрин того самого оголошення (за ID).
+        # Якщо такого скрина в звіті немає — краще без скрина, ніж чуже оголошення
+        # з іншою ціною (клієнтський звіт). Корпус: ~8/652 таких колонок.
         idx = url_index.get(_listing_id(src))
-    if idx is None:
-        idx = col - 1
+        if idx is None:
+            return
+    else:
+        idx = col - 1  # синтетичний URL (підпис без посилання) — позиційний фолбек (~99%)
     if not 0 <= idx < len(rasters):
         return
     data, _url = rasters[idx]
