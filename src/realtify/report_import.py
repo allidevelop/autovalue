@@ -198,16 +198,22 @@ def _attach_screenshot(
     підписі скрина), якщо колонка має реальний URL; інакше — позиційно (col-1).
     Це виправляє нечасту перестановку скринів між колонками (корпус: 8/652)."""
     src = str(rec.get("source_url") or "")
+    idx: int | None = None
     if src.startswith("http") and "report.local" not in src:
-        # Реальний URL колонки: беремо ЛИШЕ скрин того самого оголошення (за ID).
-        # Якщо такого скрина в звіті немає — краще без скрина, ніж чуже оголошення
-        # з іншою ціною (клієнтський звіт). Корпус: ~8/652 таких колонок.
-        idx = url_index.get(_listing_id(src))
+        cid = _listing_id(src)
+        idx = url_index.get(cid)  # точний матч за ID оголошення
         if idx is None:
-            return
+            # Без точного матчу: позиційний фолбек дозволено ЛИШЕ якщо растр на цій
+            # позиції не має ВЛАСНОГО (іншого) ID. Якщо в нього явно інший ID — це
+            # чуже оголошення, скрин не ставимо (щоб не показати іншу ціну клієнту).
+            pos = col - 1
+            if 0 <= pos < len(rasters):
+                pos_id = _listing_id(rasters[pos][1])
+                if not pos_id or pos_id == cid:
+                    idx = pos
     else:
         idx = col - 1  # синтетичний URL (підпис без посилання) — позиційний фолбек (~99%)
-    if not 0 <= idx < len(rasters):
+    if idx is None or not 0 <= idx < len(rasters):
         return
     data, _url = rasters[idx]
     ak = address_key(
