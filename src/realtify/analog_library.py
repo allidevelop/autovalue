@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from realtify import analog_cache
+from realtify import report_db
 from realtify.collect_from_links import collect_from_links
 from realtify.models import PropertyType, TransactionType
 from realtify.progress import ProgressCallback, emit_progress
@@ -149,24 +150,51 @@ def import_library(
                 report["results"].append(item)
                 emit_progress(progress, f"[{index}/{len(entries)}] {entry.address}: 0 зібрано — пропускаю.")
                 continue
-            key = analog_cache.address_key(
-                city=entry.city, address=entry.address,
-                property_type=prop, complex_name=entry.complex_name,
-            )
-            analog_cache.save(
-                key, city=entry.city, address=entry.address,
-                property_type=prop, complex_name=entry.complex_name,
-                candidates=collection.candidates,
-            )
+            # Пишемо в НОВУ курировану базу report_comparables (та сама, що CRUD/
+            # add-by-URL/імпорт звітів), а не в старий analog_cache. Аналог — за
+            # власною (зібраною) адресою; адреса/місто/ЖК із файлу — як фолбек.
+            rows: list[dict[str, Any]] = []
+            for cand in collection.candidates:
+                addr = cand.address or entry.address
+                ak = analog_cache.address_key(
+                    city=cand.city or entry.city, address=addr, property_type=prop, complex_name=None,
+                )
+                dk = report_db.compute_dedup_key(ak, cand.area_m2, cand.price_usd, cand.floor_or_level)
+                sp = None
+                img = cand.report_image_path or cand.screenshot_path
+                if img and Path(str(img)).exists():
+                    try:
+                        sp = str(report_db.store_screenshot(dk, Path(str(img)).read_bytes()))
+                    except Exception:  # noqa: BLE001
+                        sp = None
+                rows.append({
+                    "city": cand.city or entry.city,
+                    "address": addr,
+                    "complex_name": cand.complex_name or entry.complex_name,
+                    "property_type": prop,
+                    "area_m2": cand.area_m2,
+                    "price_usd": cand.price_usd,
+                    "price_per_m2_usd": cand.price_per_m2_usd,
+                    "floor_or_level": cand.floor_or_level,
+                    "rooms": cand.rooms,
+                    "location_quality": cand.location_quality,
+                    "building_class": cand.building_class,
+                    "condition": cand.condition,
+                    "delivery_date": cand.delivery_date,
+                    "source_key": "library",
+                    "source_url": str(cand.source_url) if cand.source_url else None,
+                    "screenshot_path": sp,
+                })
+            stats = report_db.upsert_many(rows)
             item["status"] = "saved"
-            item["collected"] = len(collection.candidates)
-            item["key"] = key
+            item["collected"] = len(rows)
+            item["db"] = stats
             report["saved_addresses"] += 1
-            report["saved_analogs"] += len(collection.candidates)
+            report["saved_analogs"] += len(rows)
             emit_progress(
                 progress,
-                f"[{index}/{len(entries)}] {entry.address}: збережено {len(collection.candidates)} "
-                f"у бібліотеку (ключ {key}).",
+                f"[{index}/{len(entries)}] {entry.address}: у базу {len(rows)} аналогів "
+                f"(нових {stats.get('inserted', 0)}, оновлено {stats.get('updated', 0)}).",
             )
         except Exception as exc:  # noqa: BLE001 — одна адреса не повинна валити весь імпорт
             item["status"] = "error"
