@@ -199,35 +199,37 @@ def _pick_techpass_pages(pdf: Path, pages: list[int]) -> list[int]:
 
     poppler = find_poppler_bin()
     exe = str(poppler / "pdftotext") if poppler else "pdftotext"
-    markers = [
-        ("поверх розташ", 4), ("експлікац", 4), ("план поверх", 4),
-        ("загальна площа", 2), ("житлова площа", 1),
-        ("технічної інвентаризації", 1), ("кількість житлових кімнат", 1),
-    ]
-    scored: list[tuple[int, int, str]] = []
+    texts: dict[int, str] = {}
     for page in pages:
         try:
             result = subprocess.run(
                 [exe, "-f", str(page), "-l", str(page), str(pdf), "-"],
                 capture_output=True, text=True, timeout=30,
             )
-            text = (result.stdout or "").lower()
+            texts[page] = (result.stdout or "").lower()
         except Exception:  # noqa: BLE001
-            text = ""
-        scored.append((page, sum(w for kw, w in markers if kw in text), text))
+            texts[page] = ""
+
+    plan_kw = ("план поверх", "експлікац")
+    tep_kw = (("поверх розташ", 4), ("загальна площа", 2), ("житлова площа", 1), ("кількість житлових кімнат", 1))
+    # витяг з Реєстру буд. діяльності — НЕ титул БТІ і не сторінка підписів
+    info_kw = (("реєстру будівельної діяльності", 4), ("реєстраційний номер документ", 3), ("єдиної державної електронної", 2))
+
+    def score(text: str, kws: tuple[tuple[str, int], ...]) -> int:
+        return sum(w for kw, w in kws if kw in text)
 
     # Старий формат: сторінка з планом/експлікацією — її достатньо.
-    plan = [p for p, _s, t in scored if "план поверх" in t or "експлікац" in t]
+    plan = [p for p in pages if any(k in texts[p] for k in plan_kw)]
     if plan:
         return [plan[0]]
 
-    # Цифровий формат: ТЕП-сторінка (макс. бал) + інформаційна сторінка.
-    data = [(p, s) for p, s, _t in scored if s > 0]
-    if not data:
-        return [pages[len(pages) // 2]]
-    tep = max(data, key=lambda x: x[1])[0]
-    info = next((p for p, _s in data if p != tep), None)
-    return sorted(p for p in {info, tep} if p is not None)
+    # Цифровий формат: витяг з Реєстру (адреса/замовники) + ТЕП (поверх/площа).
+    tep_ranked = sorted(((score(texts[p], tep_kw), p) for p in pages), reverse=True)
+    tep_page = tep_ranked[0][1] if tep_ranked and tep_ranked[0][0] > 0 else None
+    info_ranked = sorted(((score(texts[p], info_kw), p) for p in pages if p != tep_page), reverse=True)
+    info_page = info_ranked[0][1] if info_ranked and info_ranked[0][0] > 0 else None
+    result = sorted(p for p in (info_page, tep_page) if p is not None)
+    return result or [pages[len(pages) // 2]]
 
 
 def _image_aspect(path: Path) -> float:
