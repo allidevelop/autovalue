@@ -147,8 +147,8 @@ def _swap_object_document_scans(output: Path, intake: IntakeResult | None, task:
     se = intake.selected_extract
     st = intake.selected_technical_passport
     vityag_page = getattr(se, "page", None) if se else None
-    tech_pages = list(getattr(st, "pages", []) or []) if st else []
-    tech_page = _pick_techpass_page(src_pdf, tech_pages)
+    tech_pages_all = list(getattr(st, "pages", []) or []) if st else []
+    tech_pages = _pick_techpass_pages(src_pdf, tech_pages_all)
 
     notes: list[str] = []
     try:
@@ -157,31 +157,42 @@ def _swap_object_document_scans(output: Path, intake: IntakeResult | None, task:
         with tempfile.TemporaryDirectory(prefix="docscan_") as tmp:
             tmpd = Path(tmp)
             mapping: dict[str, Path] = {}
+            aspects: dict[str, float] = {}
             if vityag_page:
                 imgs = render_pdf_pages(src_pdf, tmpd / "v", first_page=vityag_page, last_page=vityag_page, dpi=160)
                 if imgs:
                     mapping[_DOC_SCAN_TARGETS["vityag"]] = imgs[0]
-            if tech_page:
-                imgs = render_pdf_pages(src_pdf, tmpd / "t", first_page=tech_page, last_page=tech_page, dpi=160)
-                if imgs:
-                    mapping[_DOC_SCAN_TARGETS["techpassport"]] = imgs[0]
+                    aspects[_DOC_SCAN_TARGETS["vityag"]] = _image_aspect(imgs[0])
+            if tech_pages:
+                rendered: list[Path] = []
+                for idx, page in enumerate(tech_pages):
+                    imgs = render_pdf_pages(src_pdf, tmpd / f"t{idx}", first_page=page, last_page=page, dpi=160)
+                    if imgs:
+                        rendered.append(imgs[0])
+                if rendered:
+                    stacked, aspect = _stack_images_vertical(rendered, tmpd / "techpass.png")
+                    mapping[_DOC_SCAN_TARGETS["techpassport"]] = stacked
+                    aspects[_DOC_SCAN_TARGETS["techpassport"]] = aspect
             if not mapping:
                 return ["object_scans_no_pages"]
             _replace_docx_media(output, mapping)
-            notes.append(f"object_scans_swapped: vityag=p{vityag_page}, techpass=p{tech_page}")
+            _fit_media_drawings(output, aspects)
+            notes.append(f"object_scans_swapped: vityag=p{vityag_page}, techpass=p{tech_pages}")
     except Exception as exc:  # noqa: BLE001 — підміна сканів не повинна валити звіт
         notes.append(f"object_scans_failed: {exc}")
     return notes
 
 
-def _pick_techpass_page(pdf: Path, pages: list[int]) -> int | None:
-    """Сторінка техпаспорта для звіту: план/експлікація (старий формат) АБО
-    таблиця ТЕП «Поверх розташування/Загальна площа» (новий цифровий формат).
-    Не титул і не підписи. Детект за текстом (pdftotext)."""
+def _pick_techpass_pages(pdf: Path, pages: list[int]) -> list[int]:
+    """Сторінки техпаспорта для звіту, за текстом (pdftotext):
+      • старий формат — сторінка з планом поверху/експлікацією (1 стор.);
+      • цифровий формат — інформаційна сторінка (адреса/замовники) + сторінка ТЕП
+        «Поверх розташування / Загальна площа» (2 стор.).
+    Титул і підписи виключаються."""
     if not pages:
-        return None
+        return []
     if len(pages) == 1:
-        return pages[0]
+        return [pages[0]]
     import subprocess
 
     from realtify.paths import find_poppler_bin
@@ -189,12 +200,11 @@ def _pick_techpass_page(pdf: Path, pages: list[int]) -> int | None:
     poppler = find_poppler_bin()
     exe = str(poppler / "pdftotext") if poppler else "pdftotext"
     markers = [
-        ("експлікац", 3), ("план поверх", 3),       # старий формат
-        ("поверх розташ", 3), ("технічної інвентаризації", 2),  # новий ТЕП-формат
-        ("загальна площа", 1), ("житлова площа", 1),
+        ("поверх розташ", 4), ("експлікац", 4), ("план поверх", 4),
+        ("загальна площа", 2), ("житлова площа", 1),
+        ("технічної інвентаризації", 1), ("кількість житлових кімнат", 1),
     ]
-    # дефолт: середня сторінка групи (уникаємо титулу [0] і підписів [-1])
-    best_page, best_score = pages[len(pages) // 2], 0
+    scored: list[tuple[int, int, str]] = []
     for page in pages:
         try:
             result = subprocess.run(
@@ -204,10 +214,104 @@ def _pick_techpass_page(pdf: Path, pages: list[int]) -> int | None:
             text = (result.stdout or "").lower()
         except Exception:  # noqa: BLE001
             text = ""
-        score = sum(weight for kw, weight in markers if kw in text)
-        if score > best_score:
-            best_score, best_page = score, page
-    return best_page
+        scored.append((page, sum(w for kw, w in markers if kw in text), text))
+
+    # Старий формат: сторінка з планом/експлікацією — її достатньо.
+    plan = [p for p, _s, t in scored if "план поверх" in t or "експлікац" in t]
+    if plan:
+        return [plan[0]]
+
+    # Цифровий формат: ТЕП-сторінка (макс. бал) + інформаційна сторінка.
+    data = [(p, s) for p, s, _t in scored if s > 0]
+    if not data:
+        return [pages[len(pages) // 2]]
+    tep = max(data, key=lambda x: x[1])[0]
+    info = next((p for p, _s in data if p != tep), None)
+    return sorted(p for p in {info, tep} if p is not None)
+
+
+def _image_aspect(path: Path) -> float:
+    try:
+        from PIL import Image
+
+        with Image.open(path) as im:
+            return im.height / im.width if im.width else 1.414
+    except Exception:  # noqa: BLE001
+        return 1.414
+
+
+def _stack_images_vertical(paths: list[Path], out: Path) -> tuple[Path, float]:
+    """Склеює сторінки вертикально в одне зображення (спільна ширина). Повертає
+    (шлях, співвідношення H/W). Для 1 сторінки чи без PIL — без склейки."""
+    if len(paths) == 1:
+        return paths[0], _image_aspect(paths[0])
+    try:
+        from PIL import Image
+    except Exception:  # noqa: BLE001
+        return paths[0], _image_aspect(paths[0])
+    gap = 24
+    imgs = [Image.open(p).convert("RGB") for p in paths]
+    width = max(im.width for im in imgs)
+    scaled = [im if im.width == width else im.resize((width, round(im.height * width / im.width))) for im in imgs]
+    total_h = sum(im.height for im in scaled) + gap * (len(scaled) - 1)
+    canvas = Image.new("RGB", (width, total_h), "white")
+    y = 0
+    for im in scaled:
+        canvas.paste(im, (0, y))
+        y += im.height + gap
+    canvas.save(out)
+    return out, (total_h / width if width else 1.414)
+
+
+def _fit_media_drawings(docx_path: Path, aspects: dict[str, float]) -> None:
+    """Підганяє рамки (drawing extent) підмінених сканів під фактичне співвідношення
+    сторін, з обмеженням висоти однією сторінкою (щоб 2-сторінковий ТЕП не
+    «розтягувався»). Ширину зберігає, якщо вписується; інакше масштабує пропорційно."""
+    import re
+    import shutil
+    import zipfile
+
+    max_h = 8_000_000  # ~22 см у EMU
+    with zipfile.ZipFile(docx_path) as z:
+        rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
+        doc = z.read("word/document.xml").decode("utf-8")
+
+    rid_aspect: dict[str, float] = {}
+    for arc, aspect in aspects.items():
+        media = arc.split("/")[-1]
+        m = re.search(r'Id="([^"]+)"[^>]*Target="[^"]*' + re.escape(media) + r'"', rels) or re.search(
+            r'Target="[^"]*' + re.escape(media) + r'"[^>]*Id="([^"]+)"', rels
+        )
+        if m:
+            rid_aspect[m.group(1)] = aspect
+    if not rid_aspect:
+        return
+
+    def patch(block: str) -> str:
+        for rid, aspect in rid_aspect.items():
+            if f'r:embed="{rid}"' not in block:
+                continue
+            me = re.search(r'<wp:extent\b[^>]*\bcx="(\d+)"[^>]*\bcy="\d+"', block)
+            if not me:
+                return block
+            cx = int(me.group(1))
+            cy = round(cx * aspect)
+            if cy > max_h:
+                cy, cx = max_h, round(max_h / aspect)
+            block = re.sub(r'(<wp:extent\b[^>]*\bcx=")\d+("[^>]*\bcy=")\d+(")',
+                           rf'\g<1>{cx}\g<2>{cy}\g<3>', block, count=1)
+            block = re.sub(r'(<a:ext\b[^>]*\bcx=")\d+("[^>]*\bcy=")\d+(")',
+                           rf'\g<1>{cx}\g<2>{cy}\g<3>', block, count=1)
+            return block
+        return block
+
+    doc = re.sub(r"<w:drawing>.*?</w:drawing>", lambda m: patch(m.group(0)), doc, flags=re.S)
+    tmp = docx_path.with_suffix(".fit.docx")
+    with zipfile.ZipFile(docx_path) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = doc.encode("utf-8") if item.filename == "word/document.xml" else zin.read(item.filename)
+            zout.writestr(item, data)
+    shutil.move(str(tmp), str(docx_path))
 
 
 def _source_pdf(intake: IntakeResult, task: dict[str, Any]) -> Path | None:
