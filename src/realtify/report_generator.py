@@ -148,7 +148,7 @@ def _swap_object_document_scans(output: Path, intake: IntakeResult | None, task:
     st = intake.selected_technical_passport
     vityag_page = getattr(se, "page", None) if se else None
     tech_pages = list(getattr(st, "pages", []) or []) if st else []
-    tech_page = tech_pages[0] if tech_pages else None
+    tech_page = _pick_techpass_page(src_pdf, tech_pages)
 
     notes: list[str] = []
     try:
@@ -172,6 +172,42 @@ def _swap_object_document_scans(output: Path, intake: IntakeResult | None, task:
     except Exception as exc:  # noqa: BLE001 — підміна сканів не повинна валити звіт
         notes.append(f"object_scans_failed: {exc}")
     return notes
+
+
+def _pick_techpass_page(pdf: Path, pages: list[int]) -> int | None:
+    """Сторінка техпаспорта для звіту: план/експлікація (старий формат) АБО
+    таблиця ТЕП «Поверх розташування/Загальна площа» (новий цифровий формат).
+    Не титул і не підписи. Детект за текстом (pdftotext)."""
+    if not pages:
+        return None
+    if len(pages) == 1:
+        return pages[0]
+    import subprocess
+
+    from realtify.paths import find_poppler_bin
+
+    poppler = find_poppler_bin()
+    exe = str(poppler / "pdftotext") if poppler else "pdftotext"
+    markers = [
+        ("експлікац", 3), ("план поверх", 3),       # старий формат
+        ("поверх розташ", 3), ("технічної інвентаризації", 2),  # новий ТЕП-формат
+        ("загальна площа", 1), ("житлова площа", 1),
+    ]
+    # дефолт: середня сторінка групи (уникаємо титулу [0] і підписів [-1])
+    best_page, best_score = pages[len(pages) // 2], 0
+    for page in pages:
+        try:
+            result = subprocess.run(
+                [exe, "-f", str(page), "-l", str(page), str(pdf), "-"],
+                capture_output=True, text=True, timeout=30,
+            )
+            text = (result.stdout or "").lower()
+        except Exception:  # noqa: BLE001
+            text = ""
+        score = sum(weight for kw, weight in markers if kw in text)
+        if score > best_score:
+            best_score, best_page = score, page
+    return best_page
 
 
 def _source_pdf(intake: IntakeResult, task: dict[str, Any]) -> Path | None:
