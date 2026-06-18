@@ -368,6 +368,20 @@ def analogs_delete(item_id: int) -> dict[str, Any]:
     return {"deleted": report_db.delete(item_id)}
 
 
+@app.get("/api/analogs/{item_id}/screenshot")
+def analogs_screenshot(item_id: int) -> FileResponse:
+    from realtify import report_db
+    item = report_db.get(item_id)
+    if not item or not item.get("screenshot_path"):
+        raise HTTPException(status_code=404, detail="no screenshot")
+    path = Path(str(item["screenshot_path"])).resolve()
+    # безпека: лише файли зі сховища скринів бази
+    if path.parent != report_db.SCREENSHOT_DIR.resolve() or not path.exists():
+        raise HTTPException(status_code=404, detail="screenshot not available")
+    media = "image/jpeg" if path.suffix.lower() in (".jpg", ".jpeg") else "image/png"
+    return FileResponse(path, media_type=media)
+
+
 @app.get("/api/jobs")
 def list_jobs() -> dict[str, Any]:
     _hydrate_recent_jobs_from_disk()
