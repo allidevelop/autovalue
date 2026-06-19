@@ -494,6 +494,140 @@ def download_artifact(job_id: str, artifact_name: str) -> FileResponse:
     return FileResponse(artifact.path, filename=artifact.name)
 
 
+# ── Звіт-документ (data-driven pipeline v2: JSON → редактор → PDF/.docx) ───────
+@app.get("/api/report/style-spec")
+def report_style_spec() -> dict[str, Any]:
+    from realtify import report_styles
+    return report_styles.load_style_spec()
+
+
+def _object_dirs(output_dir: Path) -> list[Path]:
+    if not output_dir.exists():
+        return []
+    return sorted(p for p in output_dir.iterdir() if p.is_dir() and (p / "task.generated.yaml").exists())
+
+
+def _resolve_object_dir(job: "WebJob", object_label: str | None) -> Path:
+    dirs = _object_dirs(job.output_dir)
+    if not dirs:
+        raise HTTPException(status_code=404, detail="No report objects in job.")
+    if object_label:
+        for d in dirs:
+            if d.name == object_label:
+                return d
+        raise HTTPException(status_code=404, detail="Object not found.")
+    return dirs[0]
+
+
+def _reinject_locked(obj_dir: Path, doc: dict) -> dict:
+    """Перезаписує locked-ноди (table/documentScan) свіжими з даних — клієнтський
+    вміст розрахункових блоків ігнорується (цілісність розрахунку)."""
+    from realtify import report_schema as S
+    from realtify.report_document import build_report_document_from_dir
+    fresh = build_report_document_from_dir(obj_dir)
+    fresh_locked = [n for n in S.iter_nodes(fresh) if n.get("type") in S.LOCKED_TYPES]
+    it = iter(fresh_locked)
+
+    def walk(node: dict) -> None:
+        content = node.get("content")
+        if not isinstance(content, list):
+            return
+        for i, child in enumerate(content):
+            if isinstance(child, dict) and child.get("type") in S.LOCKED_TYPES:
+                repl = next(it, None)
+                if repl is not None:
+                    content[i] = repl
+            elif isinstance(child, dict):
+                walk(child)
+
+    walk(doc)
+    return doc
+
+
+@app.get("/api/jobs/{job_id}/objects")
+def list_job_objects(job_id: str) -> dict[str, Any]:
+    job = _get_job(job_id)
+    objs = [
+        {"object": d.name,
+         "has_report_json": (d / "report_document.json").exists(),
+         "has_inputs": (d / "candidates.json").exists()}
+        for d in _object_dirs(job.output_dir)
+    ]
+    return {"job_id": job_id, "objects": objs}
+
+
+@app.get("/api/jobs/{job_id}/report-json")
+def get_report_json(job_id: str, object: str | None = None) -> dict[str, Any]:
+    from realtify import report_schema
+    from realtify.report_document import build_report_document_from_dir
+    job = _get_job(job_id)
+    obj_dir = _resolve_object_dir(job, object)
+    cache = obj_dir / "report_document.json"
+    if cache.exists():
+        doc = json.loads(cache.read_text(encoding="utf-8"))
+    else:
+        doc = build_report_document_from_dir(obj_dir)
+        cache.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    return {"object": obj_dir.name, "document": doc, "errors": report_schema.validate_document(doc)}
+
+
+@app.put("/api/jobs/{job_id}/report-json")
+async def put_report_json(job_id: str, request: Request, object: str | None = None) -> dict[str, Any]:
+    from realtify import report_schema
+    job = _get_job(job_id)
+    obj_dir = _resolve_object_dir(job, object)
+    payload = await request.json()
+    doc = payload.get("document") if isinstance(payload, dict) else payload
+    errors = report_schema.validate_document(doc)
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors[:20]})
+    doc = _reinject_locked(obj_dir, doc)
+    (obj_dir / "report_document.json").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    return {"object": obj_dir.name, "saved": True, "unfilled": report_schema.unfilled_placeholders(doc)}
+
+
+async def _export_report(job_id: str, request: Request, object: str | None, fmt: str) -> dict[str, Any]:
+    from starlette.concurrency import run_in_threadpool
+
+    from realtify import report_schema
+    job = _get_job(job_id)
+    obj_dir = _resolve_object_dir(job, object)
+    payload = await request.json()
+    doc = payload.get("document") if isinstance(payload, dict) else payload
+    mode = (payload.get("mode") if isinstance(payload, dict) else None) or "clean"
+    errors = report_schema.validate_document(doc)
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors[:20]})
+    if mode == "clean":
+        unfilled = report_schema.unfilled_placeholders(doc)
+        if unfilled:
+            raise HTTPException(status_code=409, detail={"unfilled": unfilled})
+    doc = _reinject_locked(obj_dir, doc)
+    review_dir = job.output_dir / "client_review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    name = f"report_{obj_dir.name}_{mode}.{fmt}"
+    out = review_dir / name
+    if fmt == "pdf":
+        from realtify import report_pdf
+        await run_in_threadpool(report_pdf.render_document_pdf, doc, out, None, mode)
+    else:
+        from realtify import report_docx_mapper
+        await run_in_threadpool(report_docx_mapper.render_document_docx, doc, out, None, mode)
+    with JOBS_LOCK:
+        job.artifacts = _artifacts_from_disk(job.output_dir)
+    return {"object": obj_dir.name, "file": name, "kind": fmt, "mode": mode}
+
+
+@app.post("/api/jobs/{job_id}/export-pdf")
+async def export_report_pdf(job_id: str, request: Request, object: str | None = None) -> dict[str, Any]:
+    return await _export_report(job_id, request, object, "pdf")
+
+
+@app.post("/api/jobs/{job_id}/export-docx")
+async def export_report_docx(job_id: str, request: Request, object: str | None = None) -> dict[str, Any]:
+    return await _export_report(job_id, request, object, "docx")
+
+
 def _run_job(
     job_id: str,
     pdf_path: Path,
@@ -1165,6 +1299,8 @@ def _artifacts_from_disk(output_dir: Path) -> list[WebArtifact]:
 
 
 def _artifact_kind(path: Path) -> str:
+    if path.suffix.lower() == ".pdf":
+        return "pdf"
     if path.suffix.lower() == ".docx":
         return "word"
     if path.suffix.lower() in {".xls", ".xlsx", ".xlsm"}:
