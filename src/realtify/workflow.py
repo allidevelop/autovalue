@@ -147,9 +147,15 @@ def run_excel_workflow(
             report_hits, tier = [], "error"
             emit_progress(progress, f"База звітів: помилка читання ({exc}).")
         if report_hits and len(report_hits) >= required:
+            sel_overrides: dict[str, Any] = {"require_screenshot": False}
+            if tier in ("building", "complex"):
+                # Курована база того ж будинку/ЖК — площа НЕ критерій відсіву (поправку на
+                # площу робить розрахунок). Інакше валідний аналог того ж дому випадав за
+                # кепом 50%, обраних ставало <required → потік марно йшов у скрейп.
+                sel_overrides["max_area_delta_pct"] = 100.0
             cfg = {
                 **collection_cfg,
-                "selection": {**(collection_cfg.get("selection") or {}), "require_screenshot": False},
+                "selection": {**(collection_cfg.get("selection") or {}), **sel_overrides},
             }
             sel = select_candidates(report_hits, target=target, collection_config=cfg, required_count=required)
             if len(sel.selected_candidates) >= required:
