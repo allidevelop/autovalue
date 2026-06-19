@@ -504,7 +504,11 @@ def report_style_spec() -> dict[str, Any]:
 def _object_dirs(output_dir: Path) -> list[Path]:
     if not output_dir.exists():
         return []
-    return sorted(p for p in output_dir.iterdir() if p.is_dir() and (p / "task.generated.yaml").exists())
+    # Папка об'єкта (не 00_pdf_intake): має і task.generated.yaml, і candidates.json.
+    return sorted(
+        p for p in output_dir.iterdir()
+        if p.is_dir() and (p / "task.generated.yaml").exists() and (p / "candidates.json").exists()
+    )
 
 
 def _resolve_object_dir(job: "WebJob", object_label: str | None) -> Path:
