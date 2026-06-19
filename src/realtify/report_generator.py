@@ -722,13 +722,24 @@ def _fill_existing_adjustment_table(table, excel_rows: dict[int, list[str]]) -> 
         42,
         43,
     ]
+    table_rows = table.rows
     for word_row_index, excel_row_index in enumerate(word_to_excel_rows):
         row_values = excel_rows.get(excel_row_index)
         if not row_values:
             continue
+        if word_row_index >= len(table_rows):
+            break
+        # КРИТИЧНО: тримаємо посилання на ВСІ клітинки рядка (list(...)) на весь
+        # внутрішній цикл. Інакше прокси _tc попередньої клітинки звільняє GC, а
+        # id() наступної переиспользует звільнену адресу → хибне спрацювання
+        # seen_cells → клітинку пропускає й лишається шаблонне значення (баг
+        # недетермінований, проявляється під навантаженням повного пайплайна).
+        cells = list(table_rows[word_row_index].cells)
         seen_cells: set[int] = set()
         for col_index, value in enumerate(row_values[:8]):
-            cell = table.cell(word_row_index, col_index)
+            if col_index >= len(cells):
+                break
+            cell = cells[col_index]
             cell_id = id(cell._tc)
             if cell_id in seen_cells:
                 continue

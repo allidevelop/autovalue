@@ -415,11 +415,19 @@ def _validate_adjustment_table(
         43,
     ]
     mismatch_count = 0
+    table_rows = table.rows
     for word_row_index, excel_row_index in enumerate(word_to_excel_rows):
         expected_values = excel_rows.get(excel_row_index, [])
+        if word_row_index >= len(table_rows):
+            break
+        # Тримаємо посилання на всі клітинки рядка — інакше id(cell._tc) у seen_cells
+        # нестабільний (GC звільняє прокси, id переиспользується) → пропуск перевірки.
+        cells = list(table_rows[word_row_index].cells)
         seen_cells: set[int] = set()
         for col_index, expected_value in enumerate(expected_values[:8]):
-            cell = table.cell(word_row_index, col_index)
+            if col_index >= len(cells):
+                break
+            cell = cells[col_index]
             cell_id = id(cell._tc)
             if cell_id in seen_cells:
                 continue
