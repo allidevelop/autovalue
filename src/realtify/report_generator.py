@@ -375,6 +375,25 @@ def _replace_docx_media(docx_path: Path, mapping: dict[str, Path]) -> None:
     shutil.move(str(tmp), str(docx_path))
 
 
+def _dominant_complex(candidates: list[Comparable]) -> str:
+    """Назва ЖК об'єкта = найчастіша назва ЖК серед відібраних аналогів того ж будинку.
+    Витяг/техпаспорт назви ЖК не містять, тож беремо її з аналогів того самого дому."""
+    from collections import Counter
+
+    names = [
+        str(c.complex_name).strip()
+        for c in candidates
+        if getattr(c, "complex_name", None) and str(c.complex_name).strip().lower() not in ("", "none", "nan")
+    ]
+    if not names:
+        return ""
+    return Counter(names).most_common(1)[0][0]
+
+
+# Видимий плейсхолдер для ручного дозаповнення (даних по об'єкту в движка немає).
+_FILL_BLANK = "________________"
+
+
 def build_report_values(
     *,
     intake: IntakeResult | None,
@@ -500,6 +519,20 @@ def build_report_values(
         "market_value_uah_conclusion": market_value_conclusion,
     }
     values["extract_reference"] = _extract_reference(values["extract_index_number"], values["extract_date"])
+    # Опис ЖК/району об'єкта: назву ЖК беремо з аналогів того ж будинку (авто),
+    # а детальні характеристики (клас/поверховість/технологія) та опис району —
+    # видимі плейсхолдери для ручного дозаповнення (даних по об'єкту в движка немає).
+    values["object_complex_name"] = (
+        _first_not_empty(target.get("complex_name"), _dominant_complex(candidates)) or f"{_FILL_BLANK} (заповнити)"
+    )
+    values["object_building_details"] = (
+        f"Клас будинку — {_FILL_BLANK}; кількість будинків — ________; поверховість — ________; "
+        f"технологія будівництва — {_FILL_BLANK}; опалення — {_FILL_BLANK} (заповнити вручну)."
+    )
+    values["location_description"] = (
+        f"{_FILL_BLANK}{_FILL_BLANK} (характеристика місцезнаходження та району розташування "
+        "об'єкта оцінки — заповнити вручну)."
+    )
     for idx, candidate in enumerate(candidates[:5], start=1):
         prefix = f"comparable_{idx}_"
         values.update(
