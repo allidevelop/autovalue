@@ -264,11 +264,15 @@ def _validate_screenshots(candidates: list[Comparable], issues: list[ValidationI
 
             with Image.open(screenshot) as image:
                 width, height = image.size
-            if width < 700 or height < 900:
+            # Поріг ловить лише биті/тумбнейл-зображення. Архівні скрини з курованої
+            # бази — це РЕАЛЬНІ регіональні кропи листингів (≈711–920px): читабельні,
+            # коректні, але не full-page. Колишній поріг 900px під них не підходив
+            # (а перескрейп історичних аналогів неможливий — оголошення вже зняті).
+            if width < 600 or height < 600:
                 _add_warning(
                     issues,
                     "candidate_screenshot_small",
-                    f"Candidate {index} screenshot looks small ({width}x{height}); expected a readable full-page archive screenshot.",
+                    f"Candidate {index} screenshot looks too small ({width}x{height}); expected a readable listing screenshot (>=600px).",
                     str(screenshot),
                 )
         except Exception as exc:
