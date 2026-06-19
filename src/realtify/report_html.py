@@ -56,14 +56,16 @@ figure {{ margin:0; }}
 figure img {{ display:block; }}
 .page-break {{ break-after: page; }}
 table.locked {{ border-collapse:collapse; table-layout:fixed; margin:6pt 0; }}
-table.locked td, table.locked th {{ border:0.5pt solid #000; vertical-align:middle; word-wrap:break-word; }}
+table.locked td, table.locked th {{ border:0.5pt solid #000; vertical-align:top; word-wrap:break-word; }}
 """.strip()
 
 
 def _table_css(spec: dict[str, Any], kind: str) -> str:
     t = styles.table_style(spec, kind)
-    return (f"font-size:{t.get('fontSizePt', 8)}pt;text-align:{t.get('align', 'center')};"
-            f"padding:{t.get('cellPaddingMm', 1.0)}mm;")
+    size = t.get("fontSizePt", 8)
+    v, h = t.get("cellPadVMm", 0.3), t.get("cellPaddingMm", 1.0)
+    return (f"font-size:{size}pt;line-height:{size + 0.5}pt;text-align:{t.get('align', 'center')};"
+            f"vertical-align:top;padding:{v}mm {h}mm;")
 
 
 def _render_text(node: dict) -> str:

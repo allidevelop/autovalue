@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from docx import Document
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -54,13 +55,12 @@ def _set_table_borders(table, color: str, size_pt: float) -> None:
     tblPr.append(borders)
 
 
-def _set_cell_margins(table, mm: float) -> None:
-    tw = round(mm * 56.6929)  # mm → twips
+def _set_cell_margins(table, v_mm: float, h_mm: float) -> None:
     tblPr = table._tbl.tblPr
     mar = OxmlElement("w:tblCellMar")
-    for edge in ("top", "bottom", "left", "right"):
+    for edge, mm in (("top", v_mm), ("bottom", v_mm), ("left", h_mm), ("right", h_mm)):
         el = OxmlElement(f"w:{edge}")
-        el.set(qn("w:w"), str(tw))
+        el.set(qn("w:w"), str(round(mm * 56.6929)))  # mm → twips
         el.set(qn("w:type"), "dxa")
         mar.append(el)
     tblPr.append(mar)
@@ -111,7 +111,7 @@ def _emit_table(doc, node: dict, spec: dict[str, Any]) -> None:
     table = doc.add_table(rows=0, cols=n_cols)
     _fixed_layout(table)
     _set_table_borders(table, ts.get("borderColor", "000000"), ts.get("borderPt", 0.5))
-    _set_cell_margins(table, ts.get("cellPaddingMm", 1.0))
+    _set_cell_margins(table, ts.get("cellPadVMm", 0.3), ts.get("cellPaddingMm", 1.0))
     align = _ALIGN.get(ts.get("align", "center"), WD_ALIGN_PARAGRAPH.CENTER)
 
     def fill(cells_text: list[str], bold: bool) -> None:
@@ -120,8 +120,13 @@ def _emit_table(doc, node: dict, spec: dict[str, Any]) -> None:
             cell = row.cells[i]
             if i < len(cols):
                 cell.width = Mm(cols[i])
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
             para = cell.paragraphs[0]
             para.alignment = align
+            pf = para.paragraph_format
+            pf.space_before = Pt(0)
+            pf.space_after = Pt(0)
+            pf.line_spacing = Pt(size_pt + 0.5)  # точна висота рядка — тугі рядки таблиці
             run = para.add_run("" if val is None else str(val))
             _set_run_font(run, fam, size_pt, bold=bold)
 
@@ -181,6 +186,10 @@ def render_document_docx(document: dict, out_path: Path, spec: dict[str, Any] | 
     normal.font.name = spec["fonts"]["body"]["family"]
     normal.font.size = Pt(spec["fonts"]["body"]["sizePt"])
     normal.font.color.rgb = RGBColor(0, 0, 0)
+    # тугий baseline — інакше Word-овський дефолтний інтервал роздуває рядки таблиці
+    normal.paragraph_format.space_before = Pt(0)
+    normal.paragraph_format.space_after = Pt(0)
+    normal.paragraph_format.line_spacing = 1.0
     for node in document.get("content", []):
         _emit_block(doc, node, spec, mode)
     out_path = Path(out_path)

@@ -12,10 +12,10 @@
   },
   "blocks": {
     "heading1": { "sizePt": 16, "bold": true, "align": "center", "spaceBeforePt": 12, "spaceAfterPt": 6 },
-    "heading2": { "sizePt": 14, "bold": true, "align": "center", "spaceBeforePt": 10, "spaceAfterPt": 4 },
-    "heading3": { "sizePt": 14, "bold": true, "align": "left", "spaceBeforePt": 8, "spaceAfterPt": 4 },
-    "heading4": { "sizePt": 14, "bold": true, "align": "left", "spaceBeforePt": 6, "spaceAfterPt": 2 },
-    "paragraph": { "sizePt": 14, "align": "justify", "lineHeight": 1.4, "firstLineIndentMm": 12.5, "spaceAfterPt": 0 },
+    "heading2": { "sizePt": 14, "bold": true, "align": "center", "spaceBeforePt": 6, "spaceAfterPt": 2 },
+    "heading3": { "sizePt": 14, "bold": true, "align": "left", "spaceBeforePt": 5, "spaceAfterPt": 2 },
+    "heading4": { "sizePt": 14, "bold": true, "align": "left", "spaceBeforePt": 4, "spaceAfterPt": 2 },
+    "paragraph": { "sizePt": 14, "align": "justify", "lineHeight": 1.25, "firstLineIndentMm": 12.5, "spaceAfterPt": 0 },
     "caption": { "sizePt": 11, "align": "center", "spaceBeforePt": 2, "spaceAfterPt": 6 },
     "definition": { "sizePt": 14, "align": "justify", "hangingIndentMm": 10 }
   },
