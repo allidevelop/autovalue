@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import re
 import shutil
@@ -174,7 +175,9 @@ def _extract_analog_images(docx_path: Path, *, min_size: int = 40_000, limit: in
                 if len(data) < min_size:
                     continue
                 m = re.search(r"https?://[^\s<>\"]+", following[:300])
-                out.append((data, m.group(0) if m else ""))
+                # XML містить &amp; — декодуємо в & (інакше URL ламається + валідатор
+                # бачить розбіжність комірки з очікуваним).
+                out.append((data, html.unescape(m.group(0)) if m else ""))
                 if len(out) >= limit:
                     break
     except Exception:  # noqa: BLE001 — відсутність скринів не валить імпорт даних

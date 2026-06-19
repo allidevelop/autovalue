@@ -287,18 +287,24 @@ def run_excel_workflow(
                 )
             except Exception as exc:  # noqa: BLE001 — кеш не повинен валити основний потік
                 emit_progress(progress, f"Кеш аналогів: не вдалося зберегти ({exc}).")
-            # Авто-поповнення курованої бази аналогів знайденим (для майбутніх оцінок + CRUD).
-            try:
-                stats = report_db.upsert_many([
-                    _comparable_to_report_row(c, target, str(property_type), valuation.valuation_date)
-                    for c in selected_collection.candidates
-                ])
-                emit_progress(
-                    progress,
-                    f"База аналогів: +{stats.get('inserted', 0)} нових, {stats.get('updated', 0)} оновлено.",
-                )
-            except Exception as exc:  # noqa: BLE001 — поповнення бази не валить потік
-                emit_progress(progress, f"База аналогів: не вдалося поповнити ({exc}).")
+            # Авто-поповнення курованої бази аналогів знайденим. ВИМКНЕНО за
+            # замовчуванням: база росте лише вручну (імпорт звітів / CRUD / add-by-URL),
+            # доки генерація звітів повністю не відкатана (релевантні аналоги, коректна
+            # оцінка, вірне розставлення в шаблоні). Увімкнути: env REALTIFY_AUTO_GROW_BASE=1.
+            if _auto_grow_base_enabled():
+                try:
+                    stats = report_db.upsert_many([
+                        _comparable_to_report_row(c, target, str(property_type), valuation.valuation_date)
+                        for c in selected_collection.candidates
+                    ])
+                    emit_progress(
+                        progress,
+                        f"База аналогів: +{stats.get('inserted', 0)} нових, {stats.get('updated', 0)} оновлено.",
+                    )
+                except Exception as exc:  # noqa: BLE001 — поповнення бази не валить потік
+                    emit_progress(progress, f"База аналогів: не вдалося поповнити ({exc}).")
+            else:
+                emit_progress(progress, "База аналогів: авто-поповнення вимкнено (до повної обкатки).")
         elif cache_key and selected_collection.candidates:
             emit_progress(
                 progress,
@@ -579,6 +585,13 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _auto_grow_base_enabled() -> bool:
+    """Чи дозволено авто-поповнення курованої бази аналогів зі скрейпу під час оцінки.
+    Вимкнено за замовчуванням — щоб помилкові/нерелевантні аналоги не засмічували базу
+    до повної обкатки генерації звітів. Увімкнути: REALTIFY_AUTO_GROW_BASE=1."""
+    return os.getenv("REALTIFY_AUTO_GROW_BASE", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _comparable_to_report_row(
