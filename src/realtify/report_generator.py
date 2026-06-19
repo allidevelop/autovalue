@@ -138,6 +138,10 @@ def generate_word_report(
 # і заміняються сканом ПОТОЧНОГО об'єкта (вит’яг / техпаспорт).
 _DOC_SCAN_TARGETS = {"vityag": "word/media/image5.png", "techpassport": "word/media/image1.png"}
 
+# Повна ширина тексту сторінки шаблону (A4, поля 2.54см) в EMU — для full-page
+# розтягування скринів аналогів на всю ширину.
+_PAGE_TEXT_WIDTH_EMU = 5_943_600
+
 # Статичні скриншоти 5 аналогів-зразків у шаблоні (порядок документа = аналог 1→5).
 _ANALOG_SLOTS = (
     "word/media/image14.png", "word/media/image13.png", "word/media/image11.png",
@@ -160,7 +164,7 @@ def _swap_analog_screenshots(output: Path, candidates: list[Comparable]) -> list
                 aspects[_ANALOG_SLOTS[i]] = _image_aspect(path)
         if mapping:
             _replace_docx_media(output, mapping)
-            _fit_media_drawings(output, aspects)
+            _fit_media_drawings(output, aspects, target_cx=_PAGE_TEXT_WIDTH_EMU)
             notes.append(f"analog_screens_swapped: {len(mapping)}/{min(len(_ANALOG_SLOTS), len(candidates))}")
     except Exception as exc:  # noqa: BLE001 — підміна скринів не валить звіт
         notes.append(f"analog_screens_failed: {exc}")
@@ -218,7 +222,7 @@ def _swap_object_document_scans(output: Path, intake: IntakeResult | None, task:
     st = intake.selected_technical_passport
     vityag_page = getattr(se, "page", None) if se else None
     tech_pages_all = list(getattr(st, "pages", []) or []) if st else []
-    tech_pages = _pick_techpass_pages(src_pdf, tech_pages_all)
+    tech_pages = _pick_techpass_pages(src_pdf, tech_pages_all, ocr_dir=getattr(intake, "pages_text_dir", None))
 
     notes: list[str] = []
     try:
@@ -253,12 +257,12 @@ def _swap_object_document_scans(output: Path, intake: IntakeResult | None, task:
     return notes
 
 
-def _pick_techpass_pages(pdf: Path, pages: list[int]) -> list[int]:
-    """Сторінки техпаспорта для звіту, за текстом (pdftotext):
-      • старий формат — сторінка з планом поверху/експлікацією (1 стор.);
-      • цифровий формат — інформаційна сторінка (адреса/замовники) + сторінка ТЕП
-        «Поверх розташування / Загальна площа» (2 стор.).
-    Титул і підписи виключаються."""
+def _pick_techpass_pages(pdf: Path, pages: list[int], ocr_dir: Path | str | None = None) -> list[int]:
+    """Сторінка техпаспорта для звіту, за текстом сторінки. Пріоритет — головна
+    сторінка «ТЕХНІЧНИЙ ПАСПОРТ» (характеристики об'єкта), а не план/експлікація.
+    Скановані БТІ не мають текстового шару (pdftotext порожній) — тоді беремо
+    OCR-текст інтейка (ocr_dir/page_NNN.txt). Якщо «технічний паспорт»-сторінки
+    немає (цифровий формат) — інформаційна сторінка + сторінка ТЕП."""
     if not pages:
         return []
     if len(pages) == 1:
@@ -269,18 +273,28 @@ def _pick_techpass_pages(pdf: Path, pages: list[int]) -> list[int]:
 
     poppler = find_poppler_bin()
     exe = str(poppler / "pdftotext") if poppler else "pdftotext"
+    ocr = Path(ocr_dir) if ocr_dir else None
     texts: dict[int, str] = {}
     for page in pages:
+        text = ""
         try:
             result = subprocess.run(
                 [exe, "-f", str(page), "-l", str(page), str(pdf), "-"],
                 capture_output=True, text=True, timeout=30,
             )
-            texts[page] = (result.stdout or "").lower()
+            text = result.stdout or ""
         except Exception:  # noqa: BLE001
-            texts[page] = ""
+            text = ""
+        # Сканований БТІ без текстового шару → OCR-текст інтейка (page_NNN.txt).
+        if not text.strip() and ocr:
+            f = ocr / f"page_{page:03d}.txt"
+            if f.exists():
+                try:
+                    text = f.read_text(encoding="utf-8", errors="ignore")
+                except Exception:  # noqa: BLE001
+                    text = ""
+        texts[page] = text.lower()
 
-    plan_kw = ("план поверх", "експлікац")
     tep_kw = (("поверх розташ", 4), ("загальна площа", 2), ("житлова площа", 1), ("кількість житлових кімнат", 1))
     # витяг з Реєстру буд. діяльності — НЕ титул БТІ і не сторінка підписів
     info_kw = (("реєстру будівельної діяльності", 4), ("реєстраційний номер документ", 3), ("єдиної державної електронної", 2))
@@ -288,10 +302,11 @@ def _pick_techpass_pages(pdf: Path, pages: list[int]) -> list[int]:
     def score(text: str, kws: tuple[tuple[str, int], ...]) -> int:
         return sum(w for kw, w in kws if kw in text)
 
-    # Старий формат: сторінка з планом/експлікацією — її достатньо.
-    plan = [p for p in pages if any(k in texts[p] for k in plan_kw)]
-    if plan:
-        return [plan[0]]
+    # Головна сторінка техпаспорта: «технічний паспорт» (+ характеристики об'єкта).
+    techpass_kw = (("технічний паспорт", 5), ("загальна площа", 2), ("житлова площа", 1), ("поверх", 1))
+    tp_ranked = sorted(((score(texts[p], techpass_kw), p) for p in pages), reverse=True)
+    if tp_ranked and tp_ranked[0][0] >= 5:
+        return [tp_ranked[0][1]]
 
     # Цифровий формат: витяг з Реєстру (адреса/замовники) + ТЕП (поверх/площа).
     tep_ranked = sorted(((score(texts[p], tep_kw), p) for p in pages), reverse=True)
@@ -335,10 +350,11 @@ def _stack_images_vertical(paths: list[Path], out: Path) -> tuple[Path, float]:
     return out, (total_h / width if width else 1.414)
 
 
-def _fit_media_drawings(docx_path: Path, aspects: dict[str, float]) -> None:
+def _fit_media_drawings(docx_path: Path, aspects: dict[str, float], target_cx: int | None = None) -> None:
     """Підганяє рамки (drawing extent) підмінених сканів під фактичне співвідношення
     сторін, з обмеженням висоти однією сторінкою (щоб 2-сторінковий ТЕП не
-    «розтягувався»). Ширину зберігає, якщо вписується; інакше масштабує пропорційно."""
+    «розтягувався»). Якщо задано target_cx — ставить саме цю ширину (full-page для
+    скринів аналогів); інакше зберігає ширину шаблону."""
     import re
     import shutil
     import zipfile
@@ -366,7 +382,7 @@ def _fit_media_drawings(docx_path: Path, aspects: dict[str, float]) -> None:
             me = re.search(r'<wp:extent\b[^>]*\bcx="(\d+)"[^>]*\bcy="\d+"', block)
             if not me:
                 return block
-            cx = int(me.group(1))
+            cx = target_cx or int(me.group(1))
             cy = round(cx * aspect)
             if cy > max_h:
                 cy, cx = max_h, round(max_h / aspect)
