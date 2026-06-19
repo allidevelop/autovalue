@@ -9,6 +9,7 @@ from typing import Any
 
 import yaml
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.oxml.ns import qn
 from docx.shared import Pt
 from pydantic import ValidationError
 from rich.console import Console
@@ -117,6 +118,9 @@ def generate_word_report(
     if resized_images:
         warnings.append(f"resized_oversized_images: {resized_images}")
 
+    # Підписи під скринами аналогів = посилання відібраних аналогів (а не зразка).
+    warnings.extend(_swap_analog_captions(document, candidates))
+
     document.save(str(output))
     # Замінюємо статичні скани витяга/техпаспорта в шаблоні на сторінки ЦЬОГО об'єкта.
     warnings.extend(_swap_object_document_scans(output, intake, task))
@@ -160,6 +164,42 @@ def _swap_analog_screenshots(output: Path, candidates: list[Comparable]) -> list
             notes.append(f"analog_screens_swapped: {len(mapping)}/{min(len(_ANALOG_SLOTS), len(candidates))}")
     except Exception as exc:  # noqa: BLE001 — підміна скринів не валить звіт
         notes.append(f"analog_screens_failed: {exc}")
+    return notes
+
+
+def _swap_analog_captions(document, candidates: list[Comparable]) -> list[str]:
+    """Підписи-посилання під скриншотами аналогів у шаблоні — статичні (зразковий
+    об'єкт: «Дніпровська набережна 17-К…»). Замінюємо їх на посилання ВІДІБРАНИХ
+    аналогів: підпис i → аналог i (у порядку документа, що збігається з порядком
+    підміни скринів). Оновлюємо і текст, і ціль гіперпосилання."""
+    notes: list[str] = []
+    try:
+        rels = document.part.rels
+        hosts = ("rieltor.ua", "dom.ria", "olx.ua", "lun.ua")
+        caps = []
+        for p in document.paragraphs:
+            for hl in p._p.findall(".//" + qn("w:hyperlink")):
+                rid = hl.get(qn("r:id"))
+                tgt = (rels[rid].target_ref if (rid and rid in rels) else "") or ""
+                if any(h in tgt.lower() for h in hosts):
+                    caps.append(p)
+                    break
+        swapped = 0
+        for i, p in enumerate(caps[: len(candidates)]):
+            cand = candidates[i]
+            url = str(cand.source_url or "")
+            text = (cand.address or url or "").strip()
+            for child in list(p._p):
+                if child.tag != qn("w:pPr"):
+                    p._p.remove(child)
+            if url and not url.startswith("https://report.local"):
+                add_hyperlink(p, url, text or url)
+            else:
+                p.add_run(text or "—")
+            swapped += 1
+        notes.append(f"analog_captions_swapped: {swapped}/{len(caps)}")
+    except Exception as exc:  # noqa: BLE001 — підміна підписів не валить звіт
+        notes.append(f"analog_captions_failed: {exc}")
     return notes
 
 
