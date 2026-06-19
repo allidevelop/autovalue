@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "page": {
+    "size": "A4",
+    "widthMm": 210,
+    "heightMm": 297,
+    "marginMm": { "top": 20, "right": 15, "bottom": 20, "left": 30 },
+    "textWidthMm": 165
+  },
+  "fonts": {
+    "body": { "family": "Times New Roman", "fallback": "Tinos", "sizePt": 14 }
+  },
+  "blocks": {
+    "heading1": { "sizePt": 16, "bold": true, "align": "center", "spaceBeforePt": 12, "spaceAfterPt": 6 },
+    "heading2": { "sizePt": 14, "bold": true, "align": "center", "spaceBeforePt": 10, "spaceAfterPt": 4 },
+    "heading3": { "sizePt": 14, "bold": true, "align": "left", "spaceBeforePt": 8, "spaceAfterPt": 4 },
+    "heading4": { "sizePt": 14, "bold": true, "align": "left", "spaceBeforePt": 6, "spaceAfterPt": 2 },
+    "paragraph": { "sizePt": 14, "align": "justify", "lineHeight": 1.4, "firstLineIndentMm": 12.5, "spaceAfterPt": 0 },
+    "caption": { "sizePt": 11, "align": "center", "spaceBeforePt": 2, "spaceAfterPt": 6 },
+    "definition": { "sizePt": 14, "align": "justify", "hangingIndentMm": 10 }
+  },
+  "tables": {
+    "adjustment_73": {
+      "columnsMm": [50, 13, 17, 17, 17, 17, 17, 17],
+      "fontSizePt": 8,
+      "headerBold": true,
+      "borderColor": "000000",
+      "borderPt": 0.5,
+      "cellPaddingMm": 1.0,
+      "align": "center"
+    },
+    "comparables_71": {
+      "columnsMm": [10, 45, 16, 16, 24, 20, 34],
+      "fontSizePt": 9,
+      "headerBold": true,
+      "borderColor": "000000",
+      "borderPt": 0.5,
+      "cellPaddingMm": 1.2,
+      "align": "left"
+    }
+  },
+  "images": {
+    "fullWidthEmu": 5760720,
+    "maxHeightEmu": 8000000
+  },
+  "provenance": {
+    "auto": { "bg": "#E6F4EA", "wordShade": "C8E6C9" },
+    "placeholder": { "bg": "#FDECEA", "wordShade": "FFCDD2" },
+    "manual": { "bg": "#E8F0FE", "wordShade": "BBDEFB" }
+  },
+  "exportModes": {
+    "clean": { "showProvenance": false },
+    "review": { "showProvenance": true }
+  }
+}
