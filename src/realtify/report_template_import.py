@@ -10,7 +10,9 @@
 """
 from __future__ import annotations
 
+import io
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +24,11 @@ from docx.text.paragraph import Paragraph
 from realtify import report_schema as S
 from realtify import report_styles as styles
 from realtify.report_document import _ADJ_HEADER, _ADJ_ROW_ORDER  # reuse
+from realtify.report_scans import candidate_image_bytes, render_object_scans, template_media_bytes, to_data_uri
 from realtify.excel_sidecar import sidecar_adjustment_rows
+
+# Слоти аналогів у шаблоні (порядок документа = аналог 1→5).
+_ANALOG_SLOTS = ["image14.png", "image13.png", "image11.png", "image12.png", "image9.png"]
 
 _PH = re.compile(r"\{\{(\w+)\}\}")
 _TWIPS_PER_MM = 56.6929
@@ -146,33 +152,108 @@ def _is_comparables(table: Table) -> bool:
     return "об'єкт порівняння" in txt and "адреса об'єкта порівняння" in col0
 
 
+def _aspect_bytes(b: bytes) -> float:
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(b)) as im:
+            return im.height / im.width if im.width else 1.414
+    except Exception:  # noqa: BLE001
+        return 1.414
+
+
+def _fit_width(width_emu: int, aspect: float, max_h: int) -> int:
+    return round(max_h / aspect) if width_emu * aspect > max_h else width_emu
+
+
+def _drawings_in(el, doc) -> list[tuple[str, int, int]]:
+    res = []
+    for dr in el.findall(".//" + qn("w:drawing")):
+        ext = dr.find(".//" + qn("wp:extent"))
+        cx = int(ext.get("cx")) if ext is not None and ext.get("cx") else 0
+        cy = int(ext.get("cy")) if ext is not None and ext.get("cy") else 0
+        blip = dr.find(".//" + qn("a:blip"))
+        rid = blip.get(qn("r:embed")) if blip is not None else None
+        name = ""
+        if rid and rid in doc.part.rels:
+            try:
+                name = doc.part.rels[rid].target_ref.split("/")[-1]
+            except Exception:  # noqa: BLE001
+                name = ""
+        if name:
+            res.append((name, cx, cy))
+    return res
+
+
+def _build_image_map(intake, task, candidates, tmp_dir, spec) -> dict[str, tuple]:
+    """media_name → (type, kind, data_uri, width_emu, aspect, caption, href)."""
+    full_w = spec["images"]["fullWidthEmu"]
+    max_h = spec["images"]["maxHeightEmu"]
+    m: dict[str, tuple] = {}
+    scans = render_object_scans(intake, task, tmp_dir)
+    for slot, kind in (("image5.png", "vityag"), ("image1.png", "techpass")):
+        if kind in scans:
+            b, asp = scans[kind]
+            m[slot] = ("documentScan", kind, to_data_uri(b), _fit_width(full_w, asp, max_h), asp, None, None)
+    for i, slot in enumerate(_ANALOG_SLOTS):
+        if i < len(candidates):
+            b = candidate_image_bytes(candidates[i])
+            if b:
+                asp = _aspect_bytes(b)
+                cand = candidates[i]
+                cap = (getattr(cand, "address", None) or str(getattr(cand, "source_url", "")) or "").strip()
+                href = str(getattr(cand, "source_url", "")) or None
+                m[slot] = ("image", None, to_data_uri(b), _fit_width(full_w, asp, max_h), asp, cap, href)
+    return m
+
+
 def build_document_from_template(
-    *, template_path: Path, values: dict[str, Any], excel_path: Path | None
+    *, template_path: Path, values: dict[str, Any], excel_path: Path | None,
+    intake=None, task: dict | None = None, candidates: list | None = None,
 ) -> dict:
     spec = styles.load_style_spec()
     doc = Document(str(template_path))
     from realtify.report_generator import _is_existing_adjustment_table
+    candidates = candidates or []
 
     content: list[dict] = []
-    for block in _iter_body(doc):
-        if isinstance(block, Paragraph):
-            # Картинки (Фаза 2b) пропускаємо; порожні абзаци — теж.
-            if block._p.findall(".//" + qn("w:drawing")):
-                continue
-            inline = _inline(block, values)
-            if not any((n.get("text", "").strip() if n["type"] == "text" else True) for n in inline):
-                continue
-            if _is_heading(block):
-                content.append(S.heading(_heading_level(block), inline))
-            else:
-                content.append(S.paragraph(inline))
-        else:  # Table
-            if _is_existing_adjustment_table(block):
-                content.append(_adjustment_node(excel_path, spec))
-            elif _is_comparables(block):
-                content.append(_comparables_node(values, block, spec))
-            else:
-                node = _generic_table_node(block, values, spec)
-                if node:
-                    content.append(node)
+    with tempfile.TemporaryDirectory(prefix="rep_img_") as tmp:
+        img_map = _build_image_map(intake, task, candidates, Path(tmp), spec)
+        for block in _iter_body(doc):
+            if isinstance(block, Paragraph):
+                draws = _drawings_in(block._p, doc)
+                if draws:
+                    for name, cx, cy in draws:
+                        entry = img_map.get(name)
+                        if entry:
+                            typ, kind, uri, w, asp, cap, href = entry
+                            if typ == "documentScan":
+                                content.append(S.document_scan(kind, uri, w, asp))
+                            else:
+                                content.append(S.image(uri, w, asp, caption=cap, href=href))
+                        else:  # статична картинка шаблону (штамп/підпис/сертифікат/лого)
+                            sb = template_media_bytes(template_path, name)
+                            if sb and cx:
+                                content.append(S.image(to_data_uri(sb), cx, (cy / cx) if cx else 1.0))
+                    continue
+                inline = _inline(block, values)
+                if not any((n.get("text", "").strip() if n["type"] == "text" else True) for n in inline):
+                    continue
+                if _is_heading(block):
+                    content.append(S.heading(_heading_level(block), inline))
+                else:
+                    content.append(S.paragraph(inline))
+            else:  # Table
+                if _is_existing_adjustment_table(block):
+                    content.append(_adjustment_node(excel_path, spec))
+                elif _is_comparables(block):
+                    content.append(_comparables_node(values, block, spec))
+                else:
+                    node = _generic_table_node(block, values, spec)
+                    if node:
+                        content.append(node)
+                # Сканы об'єкта (витяг/техпаспорт) у клітинках таблиці → documentScan.
+                for name, _cx, _cy in _drawings_in(block._tbl, doc):
+                    entry = img_map.get(name)
+                    if entry and entry[0] == "documentScan":
+                        content.append(S.document_scan(entry[1], entry[2], entry[3], entry[4]))
     return S.doc(content)

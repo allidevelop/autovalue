@@ -50,7 +50,10 @@ def build_report_document(*, intake, task: dict, candidates: list, excel_path: P
         excel_path=excel_path, excel_values=read_excel_report_values(excel_path),
     )
     template = PROJECT_ROOT / "config" / "report_templates" / "valuation_report_real_template.docx"
-    return build_document_from_template(template_path=template, values=values, excel_path=excel_path)
+    return build_document_from_template(
+        template_path=template, values=values, excel_path=excel_path,
+        intake=intake, task=task, candidates=candidates,
+    )
 
 
 def build_report_document_from_dir(obj_dir: Path) -> dict:

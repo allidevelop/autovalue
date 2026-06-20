@@ -79,6 +79,19 @@ def table(kind: str, header: list[str], rows: list[list[str]], columns_mm: list[
     }
 
 
+def image(src_ref: str, width_emu: int, aspect: float, caption: str | None = None, href: str | None = None) -> dict:
+    attrs: dict[str, Any] = {"srcRef": src_ref, "widthEmu": int(width_emu), "aspect": float(aspect)}
+    if caption:
+        attrs["caption"] = caption
+    if href:
+        attrs["href"] = href
+    return {"type": "image", "attrs": attrs}
+
+
+def document_scan(kind: str, src_ref: str, width_emu: int, aspect: float) -> dict:
+    return {"type": "documentScan", "attrs": {"kind": kind, "srcRef": src_ref, "widthEmu": int(width_emu), "aspect": float(aspect), "locked": True}}
+
+
 def page_break() -> dict:
     return {"type": "pageBreak"}
 

@@ -12,7 +12,7 @@ from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Mm, Pt, RGBColor
+from docx.shared import Emu, Mm, Pt, RGBColor
 
 from realtify import report_styles as styles
 from realtify.report_styles import units
@@ -136,6 +136,38 @@ def _emit_table(doc, node: dict, spec: dict[str, Any]) -> None:
         fill(list(r), False)
 
 
+def _emit_image(doc, node: dict, spec: dict[str, Any]) -> None:
+    import base64
+    import io
+
+    a = node.get("attrs") or {}
+    src = str(a.get("srcRef", ""))
+    if not src.startswith("data:") or "," not in src:
+        return
+    try:
+        data = base64.b64decode(src.split(",", 1)[1])
+    except Exception:  # noqa: BLE001
+        return
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    w = int(a.get("widthEmu") or 0)
+    try:
+        p.add_run().add_picture(io.BytesIO(data), width=Emu(w) if w else None)
+    except Exception:  # noqa: BLE001
+        return
+    cap, href = a.get("caption"), a.get("href")
+    if cap or href:
+        cp = doc.add_paragraph()
+        cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        size = styles.block_style(spec, "caption").get("sizePt", 11)
+        if href:
+            from realtify.word_tools import add_hyperlink
+            add_hyperlink(cp, str(href), str(cap or href))
+        else:
+            r = cp.add_run(str(cap))
+            _set_run_font(r, spec["fonts"]["body"]["family"], size)
+
+
 def _emit_block(doc, node: dict, spec: dict[str, Any], mode: str) -> None:
     t = node.get("type")
     if t == "heading":
@@ -168,6 +200,8 @@ def _emit_block(doc, node: dict, spec: dict[str, Any], mode: str) -> None:
         _emit_inline(p, node.get("content", []), spec, b.get("sizePt", 14), mode)
     elif t == "table":
         _emit_table(doc, node, spec)
+    elif t in ("image", "documentScan"):
+        _emit_image(doc, node, spec)
     elif t == "pageBreak":
         doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
     elif t in ("bulletList", "orderedList"):
