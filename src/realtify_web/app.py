@@ -523,21 +523,52 @@ def _resolve_object_dir(job: "WebJob", object_label: str | None) -> Path:
     return dirs[0]
 
 
-def _reinject_locked(obj_dir: Path, doc: dict) -> dict:
-    """Перезаписує locked-ноди (table/documentScan) свіжими з даних — клієнтський
-    вміст розрахункових блоків ігнорується (цілісність розрахунку)."""
+_IMAGE_TYPES = {"image", "documentScan"}
+
+
+def _doc_image_nodes(doc: dict) -> list[dict]:
+    """Усі image/documentScan-ноди у порядку документа (= порядок раздачі по index)."""
     from realtify import report_schema as S
+    return [n for n in S.iter_nodes(doc) if n.get("type") in _IMAGE_TYPES]
+
+
+def _load_or_build_full(obj_dir: Path) -> dict:
+    """Повний документ (із data-URI картинок) — авторитетний кеш на диску джоби."""
     from realtify.report_document import build_report_document_from_dir
-    fresh = build_report_document_from_dir(obj_dir)
-    fresh_locked = [n for n in S.iter_nodes(fresh) if n.get("type") in S.LOCKED_TYPES]
-    it = iter(fresh_locked)
+    cache = obj_dir / "report_document.json"
+    if cache.exists():
+        return json.loads(cache.read_text(encoding="utf-8"))
+    doc = build_report_document_from_dir(obj_dir)
+    cache.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    return doc
+
+
+def _light_doc(full_doc: dict) -> dict:
+    """Лёгка копія документа: важкі data-URI картинок → маркер reportimg:{i}
+    (картинки фронт тягне окремим запитом /report-image?node=i). ~4 МБ → ~50 КБ."""
+    import copy
+    light = copy.deepcopy(full_doc)
+    for i, n in enumerate(_doc_image_nodes(light)):
+        n.setdefault("attrs", {})["srcRef"] = f"reportimg:{i}"
+    return light
+
+
+def _reinject_from_cache(obj_dir: Path, doc: dict) -> dict:
+    """Відновлює у клієнтському документі locked-ноди (table/documentScan) ТА дані
+    картинок (image) з авторитетного кешу по позиції. Клієнт надсилає лёгкий JSON
+    (картинки — лише посилання); розрахункові блоки не редагуються вручну."""
+    from realtify import report_schema as S
+    full = _load_or_build_full(obj_dir)
+    restore_types = S.LOCKED_TYPES | {"image"}
+    fresh = [n for n in S.iter_nodes(full) if n.get("type") in restore_types]
+    it = iter(fresh)
 
     def walk(node: dict) -> None:
         content = node.get("content")
         if not isinstance(content, list):
             return
         for i, child in enumerate(content):
-            if isinstance(child, dict) and child.get("type") in S.LOCKED_TYPES:
+            if isinstance(child, dict) and child.get("type") in restore_types:
                 repl = next(it, None)
                 if repl is not None:
                     content[i] = repl
@@ -563,16 +594,34 @@ def list_job_objects(job_id: str) -> dict[str, Any]:
 @app.get("/api/jobs/{job_id}/report-json")
 def get_report_json(job_id: str, object: str | None = None) -> dict[str, Any]:
     from realtify import report_schema
-    from realtify.report_document import build_report_document_from_dir
     job = _get_job(job_id)
     obj_dir = _resolve_object_dir(job, object)
-    cache = obj_dir / "report_document.json"
-    if cache.exists():
-        doc = json.loads(cache.read_text(encoding="utf-8"))
-    else:
-        doc = build_report_document_from_dir(obj_dir)
-        cache.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
-    return {"object": obj_dir.name, "document": doc, "errors": report_schema.validate_document(doc)}
+    full = _load_or_build_full(obj_dir)
+    light = _light_doc(full)
+    return {"object": obj_dir.name, "document": light, "errors": report_schema.validate_document(light)}
+
+
+@app.get("/api/jobs/{job_id}/report-image")
+def get_report_image(job_id: str, object: str | None = None, node: int = 0) -> Response:
+    """Раздача однієї картинки звіту (декодований data-URI з авторитетного кешу) —
+    щоб JSON редактора лишався лёгким."""
+    import base64
+    job = _get_job(job_id)
+    obj_dir = _resolve_object_dir(job, object)
+    imgs = _doc_image_nodes(_load_or_build_full(obj_dir))
+    if node < 0 or node >= len(imgs):
+        raise HTTPException(status_code=404, detail="Image node out of range.")
+    src = str((imgs[node].get("attrs") or {}).get("srcRef", ""))
+    if not src.startswith("data:") or "," not in src:
+        raise HTTPException(status_code=404, detail="No image data.")
+    header, b64 = src.split(",", 1)
+    low = header.lower()
+    media = "image/png" if "png" in low else ("image/jpeg" if "jpe" in low or "jpg" in low else "application/octet-stream")
+    try:
+        data = base64.b64decode(b64)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=404, detail="Bad image data.") from exc
+    return Response(content=data, media_type=media, headers={"Cache-Control": "private, max-age=3600"})
 
 
 @app.put("/api/jobs/{job_id}/report-json")
@@ -585,7 +634,7 @@ async def put_report_json(job_id: str, request: Request, object: str | None = No
     errors = report_schema.validate_document(doc)
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors[:20]})
-    doc = _reinject_locked(obj_dir, doc)
+    doc = _reinject_from_cache(obj_dir, doc)
     (obj_dir / "report_document.json").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
     return {"object": obj_dir.name, "saved": True, "unfilled": report_schema.unfilled_placeholders(doc)}
 
@@ -606,7 +655,7 @@ async def _export_report(job_id: str, request: Request, object: str | None, fmt:
         unfilled = report_schema.unfilled_placeholders(doc)
         if unfilled:
             raise HTTPException(status_code=409, detail={"unfilled": unfilled})
-    doc = _reinject_locked(obj_dir, doc)
+    doc = _reinject_from_cache(obj_dir, doc)
     review_dir = job.output_dir / "client_review"
     review_dir.mkdir(parents=True, exist_ok=True)
     name = f"report_{obj_dir.name}_{mode}.{fmt}"
