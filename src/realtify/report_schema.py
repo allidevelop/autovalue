@@ -148,7 +148,7 @@ def validate_document(document: Any) -> list[str]:
                 errors.append(f"{path}: variableField source invalid")
         elif t == "table":
             a = node.get("attrs") or {}
-            if a.get("kind") not in {"adjustment_73", "comparables_71"}:
+            if a.get("kind") not in {"adjustment_73", "comparables_71", "generic"}:
                 errors.append(f"{path}: table kind invalid")
             if not isinstance(a.get("rows"), list) or not isinstance(a.get("columnsMm"), list):
                 errors.append(f"{path}: table needs rows[] and columnsMm[]")
