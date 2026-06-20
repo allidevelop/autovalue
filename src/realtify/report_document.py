@@ -40,27 +40,17 @@ def _adjustment_table_node(excel_path: Path | None, spec: dict[str, Any]) -> dic
 
 
 def build_report_document(*, intake, task: dict, candidates: list, excel_path: Path | None) -> dict:
-    """Будує schema-JSON документа звіту (вертикальний зріз Фази 1)."""
-    spec = styles.load_style_spec()
+    """Будує повний schema-JSON документа звіту з даних об'єкта (Фаза 2):
+    імпортує структуру вже-виправленого шаблону й наповнює її значеннями."""
+    from realtify.paths import PROJECT_ROOT
+    from realtify.report_template_import import build_document_from_template
+
     values = build_report_values(
         intake=intake, task=task, candidates=candidates,
         excel_path=excel_path, excel_values=read_excel_report_values(excel_path),
     )
-    address = values.get("address_full", "")
-    location_desc = values.get("location_description", "")
-
-    content: list[dict] = [
-        S.heading(2, [S.text("МІСЦЕЗНАХОДЖЕННЯ")], numbering="5.1"),
-        S.paragraph([
-            S.text("Об'єкт оцінки розташований за адресою: "),
-            S.variable_field("address_full", address, "auto"),
-            S.text("."),
-        ]),
-        S.paragraph([S.variable_field("location_description", location_desc)]),
-        S.heading(3, [S.text("Розрахунок вартості порівняльним підходом")], numbering="7.3"),
-        _adjustment_table_node(excel_path, spec),
-    ]
-    return S.doc(content)
+    template = PROJECT_ROOT / "config" / "report_templates" / "valuation_report_real_template.docx"
+    return build_document_from_template(template_path=template, values=values, excel_path=excel_path)
 
 
 def build_report_document_from_dir(obj_dir: Path) -> dict:
