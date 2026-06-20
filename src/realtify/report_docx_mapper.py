@@ -188,7 +188,10 @@ def _emit_block(doc, node: dict, spec: dict[str, Any], mode: str) -> None:
         align = (node.get("attrs") or {}).get("align", b.get("align", "justify"))
         p.alignment = _ALIGN.get(align, WD_ALIGN_PARAGRAPH.JUSTIFY)
         pf = p.paragraph_format
-        pf.line_spacing = b.get("lineHeight", 1.4)
+        # EXACT-інтервал = (lineHeight × sizePt) у пунктах, щоб збігтися з CSS line-height
+        # (число × font-size, без шрифтових метрик). MULTIPLE у Word рахується від
+        # натуральної висоти рядка шрифту (~1.15em) → рядки на ~15% вищі, ніж у HTML/PDF.
+        pf.line_spacing = Pt(b.get("lineHeight", 1.4) * b.get("sizePt", 14))
         pf.space_after = Pt(b.get("spaceAfterPt", 0))
         if t == "definitionItem":
             term = (node.get("attrs") or {}).get("term", "")
