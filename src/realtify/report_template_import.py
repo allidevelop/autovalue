@@ -144,6 +144,38 @@ def _generic_table_node(table: Table, values: dict[str, Any], spec: dict[str, An
     return S.table("generic", [], rows, cols)
 
 
+def _table_has_fill_markers(table: Table) -> bool:
+    for row in table.rows:
+        for c in row.cells:
+            t = c.text
+            if "заповнити" in t.lower() or "________" in t:
+                return True
+    return False
+
+
+def _editable_table_blocks(table: Table, ti: int) -> list[dict]:
+    """Таблиця з ручними плейсхолдерами (напр. «Характеристика місця розташування»)
+    → редаговані рядки «Мітка: [поле]» (замість read-only снапшота)."""
+    rows = list(table.rows)
+    out: list[dict] = []
+    if rows:
+        hdr = rows[0].cells[0].text.strip()
+        if hdr:
+            out.append(S.heading(4, [S.text(hdr)]))
+    for ri in range(1, len(rows)):
+        cells = rows[ri].cells
+        label = " ".join(cells[0].text.split()).rstrip(":")
+        if len(cells) >= 2 and cells[0]._tc is not cells[1]._tc:
+            value = cells[1].text.strip()
+            out.append(S.paragraph([
+                S.text(label + ": ", [S.bold()]),
+                S.variable_field(f"char_{ti}_{ri}", value or "________________"),
+            ]))
+        elif label:
+            out.append(S.paragraph([S.text(label)]))
+    return out
+
+
 def _is_comparables(table: Table) -> bool:
     if len(table.columns) != 7 or len(table.rows) < 6:
         return False
@@ -216,6 +248,7 @@ def build_document_from_template(
     candidates = candidates or []
 
     content: list[dict] = []
+    ti = 0
     with tempfile.TemporaryDirectory(prefix="rep_img_") as tmp:
         img_map = _build_image_map(intake, task, candidates, Path(tmp), spec)
         for block in _iter_body(doc):
@@ -243,10 +276,13 @@ def build_document_from_template(
                 else:
                     content.append(S.paragraph(inline))
             else:  # Table
+                ti += 1
                 if _is_existing_adjustment_table(block):
                     content.append(_adjustment_node(excel_path, spec))
                 elif _is_comparables(block):
                     content.append(_comparables_node(values, block, spec))
+                elif _table_has_fill_markers(block):
+                    content.extend(_editable_table_blocks(block, ti))
                 else:
                     node = _generic_table_node(block, values, spec)
                     if node:
