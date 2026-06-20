@@ -759,11 +759,59 @@ def _run_job(
         _notify_job_finished(job_id)
 
 
+def _report_v2_enabled() -> bool:
+    return os.getenv("REALTIFY_REPORT_V2", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _report_v2_pdf_enabled() -> bool:
+    # PDF потребує Playwright/Chromium — окремий тумблер; за замовч. УВІМК, коли v2 увімкнено.
+    raw = os.getenv("REALTIFY_REPORT_V2_PDF", "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return True
+
+
+def _render_report_v2(job_id: str, obj_dir: Path, review_dir: Path, label: str) -> list[WebArtifact]:
+    """Рендерить data-driven звіт v2 (.docx[+.pdf]) як ПЕРВИННИЙ артефакт об'єкта.
+    mode='clean' — без підсвітки походження; рендер НЕ блокує на незаповнених
+    плейсхолдерах (rooms/location_description/char_* лишаються ________, як і в
+    legacy-чернетці; блокує лише web-export). Кеш report_document.json
+    перевикористовується (той самий, що й у редакторі)."""
+    from realtify import report_docx_mapper
+    out: list[WebArtifact] = []
+    try:
+        doc = _load_or_build_full(obj_dir)
+    except Exception as exc:  # noqa: BLE001 — падіння v2 не має валити весь пакет.
+        _append_event(job_id, f"Звіт v2 ({label}): не вдалося зібрати документ — {exc}. Лишаю legacy.")
+        return out
+    docx_target = review_dir / f"report_{label}.docx"
+    try:
+        report_docx_mapper.render_document_docx(doc, docx_target, None, "clean")
+        out.append(WebArtifact(name=docx_target.name, path=docx_target, kind="word"))
+        _append_event(job_id, f"Звіт v2 ({label}): .docx сформовано як первинний артефакт.")
+    except Exception as exc:  # noqa: BLE001
+        _append_event(job_id, f"Звіт v2 ({label}): помилка рендера .docx — {exc}. Лишаю legacy.")
+        return out
+    if _report_v2_pdf_enabled():
+        from realtify import report_pdf
+        pdf_target = review_dir / f"report_{label}.pdf"
+        try:
+            report_pdf.render_document_pdf(doc, pdf_target, None, "clean")
+            out.append(WebArtifact(name=pdf_target.name, path=pdf_target, kind="pdf"))
+            _append_event(job_id, f"Звіт v2 ({label}): .pdf сформовано.")
+        except Exception as exc:  # noqa: BLE001 — PDF опційний (Playwright може бути відсутній).
+            _append_event(job_id, f"Звіт v2 ({label}): .pdf пропущено — {exc}.")
+    return out
+
+
 def _package_result(job_id: str, result: BatchWorkflowResult) -> list[WebArtifact]:
     job = _get_job(job_id)
     review_dir = job.output_dir / "client_review"
     review_dir.mkdir(parents=True, exist_ok=True)
     artifacts: list[WebArtifact] = []
+    v2_on = _report_v2_enabled()
 
     if result.report_path.exists():
         batch_report_copy = review_dir / "batch_report.md"
@@ -772,7 +820,20 @@ def _package_result(job_id: str, result: BatchWorkflowResult) -> list[WebArtifac
 
     for index, item in enumerate(result.objects, start=1):
         label = _object_label(index, item.apartment, item.extract_page)
-        if item.word_report_path and item.word_report_path.exists():
+        if v2_on:
+            # v2 — первинний; legacy зберігаємо як вторинний *_legacy.docx (одна реліз-ітерація).
+            v2_artifacts = _render_report_v2(job_id, item.output_dir, review_dir, label)
+            artifacts.extend(v2_artifacts)
+            v2_ok = any(a.kind == "word" for a in v2_artifacts)
+            if item.word_report_path and item.word_report_path.exists():
+                legacy_name = (
+                    f"valuation_report_{label}_legacy.docx" if v2_ok
+                    else f"valuation_report_{label}.docx"
+                )
+                target = review_dir / legacy_name
+                shutil.copy2(item.word_report_path, target)
+                artifacts.append(WebArtifact(name=target.name, path=target, kind="word"))
+        elif item.word_report_path and item.word_report_path.exists():
             target = review_dir / f"valuation_report_{label}.docx"
             shutil.copy2(item.word_report_path, target)
             artifacts.append(WebArtifact(name=target.name, path=target, kind="word"))
