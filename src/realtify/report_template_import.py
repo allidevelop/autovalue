@@ -169,7 +169,7 @@ def _editable_table_blocks(table: Table, ti: int) -> list[dict]:
             value = cells[1].text.strip()
             out.append(S.paragraph([
                 S.text(label + ": ", [S.bold()]),
-                S.variable_field(f"char_{ti}_{ri}", value or "________________"),
+                S.variable_field(f"char_{ti}_{ri}", value or "________________", label=label),
             ]))
         elif label:
             out.append(S.paragraph([S.text(label)]))

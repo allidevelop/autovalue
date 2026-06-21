@@ -61,11 +61,13 @@ def text(s: str, marks: list[dict] | None = None) -> dict:
     return node
 
 
-def variable_field(field: str, value: Any, source: str | None = None, fmt: str | None = None) -> dict:
+def variable_field(field: str, value: Any, source: str | None = None, fmt: str | None = None, label: str | None = None) -> dict:
     val = "" if value is None else str(value)
     attrs: dict[str, Any] = {"field": field, "value": val, "source": source or classify_source(val)}
     if fmt:
         attrs["format"] = fmt
+    if label:
+        attrs["label"] = label  # людська назва поля для навігатора/редактора (напр. рядки char-таблиці)
     return {"type": "variableField", "attrs": attrs}
 
 
