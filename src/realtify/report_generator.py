@@ -446,6 +446,54 @@ def _dominant_complex(candidates: list[Comparable]) -> str:
     return Counter(names).most_common(1)[0][0]
 
 
+def _dominant_building_class(candidates: list[Comparable]) -> str:
+    """Клас будинку = найчастіший серед аналогів того ж ЖК (вони в тому самому домі)."""
+    from collections import Counter
+
+    vals = [
+        str(c.building_class).strip()
+        for c in candidates
+        if getattr(c, "building_class", None) and str(c.building_class).strip().lower() not in ("", "none", "nan")
+    ]
+    return Counter(vals).most_common(1)[0][0] if vals else ""
+
+
+def _dominant_floor_count(candidates: list[Comparable]) -> int | None:
+    """Поверховість будинку = знаменник «поверх/всього» аналогів (напр. «9/11» → 11)."""
+    import re
+    from collections import Counter
+
+    counts: list[int] = []
+    for c in candidates:
+        fl = getattr(c, "floor_or_level", None)
+        if not fl:
+            continue
+        m = re.search(r"/\s*(\d{1,3})", str(fl))
+        if m:
+            counts.append(int(m.group(1)))
+    return Counter(counts).most_common(1)[0][0] if counts else None
+
+
+def _building_details_text(candidates: list[Comparable]) -> str:
+    """Характеристики будинку з виводимих даних аналогів (клас + поверховість).
+    Технологія/опалення/к-сть будинків у даних відсутні — оцінювач додає за потреби
+    (поле редаговане). Якщо нічого не виводиться — видимий плейсхолдер для ручного вводу."""
+    parts: list[str] = []
+    bclass = _dominant_building_class(candidates)
+    if bclass:
+        parts.append(f"клас будинку — {bclass}")
+    floors = _dominant_floor_count(candidates)
+    if floors:
+        parts.append(f"поверховість — {floors} поверхів")
+    if not parts:
+        return (
+            f"Клас будинку — {_FILL_BLANK}; кількість будинків — ________; поверховість — ________; "
+            f"технологія будівництва — {_FILL_BLANK}; опалення — {_FILL_BLANK} (заповнити вручну)."
+        )
+    sentence = "; ".join(parts)
+    return sentence[0].upper() + sentence[1:] + "."
+
+
 # Видимий плейсхолдер для ручного дозаповнення (даних по об'єкту в движка немає).
 _FILL_BLANK = "________________"
 
@@ -581,10 +629,7 @@ def build_report_values(
     values["object_complex_name"] = (
         _first_not_empty(target.get("complex_name"), _dominant_complex(candidates)) or f"{_FILL_BLANK} (заповнити)"
     )
-    values["object_building_details"] = (
-        f"Клас будинку — {_FILL_BLANK}; кількість будинків — ________; поверховість — ________; "
-        f"технологія будівництва — {_FILL_BLANK}; опалення — {_FILL_BLANK} (заповнити вручну)."
-    )
+    values["object_building_details"] = _building_details_text(candidates)
     values["location_description"] = (
         f"{_FILL_BLANK}{_FILL_BLANK} (характеристика місцезнаходження та району розташування "
         "об'єкта оцінки — заповнити вручну)."
@@ -1130,9 +1175,12 @@ def _object_valuation_description(rooms: Any, apartment: Any, total_area: Any, a
     area = _format_decimal_comma(total_area)
     number = str(apartment or "")
     address_text = str(address or "")
-    if rooms_text and number and area and address_text:
+    # Кімнатність — необов'язкова: якщо число кімнат невідоме (немає в техпаспорті),
+    # опис будуємо без неї (№ квартири + площа + адреса вже є з витяга).
+    if number and area and address_text:
+        head = f"{rooms_text} квартири" if rooms_text else "Квартира"
         return (
-            f"{rooms_text} квартири № {number}, "
+            f"{head} № {number}, "
             f"загальною площею {area} кв.м., "
             f"яка розташована в житловому будинку за адресою: {address_text}"
         )
