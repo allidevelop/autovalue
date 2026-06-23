@@ -21,6 +21,9 @@ from realtify.paths import PROJECT_ROOT
 
 ENV_REGISTER_PATH = "REALTIFY_VALUATION_REGISTER"
 
+# Куди зберігати/звідки читати керований реєстр, якщо env не задано (UI-завантаження).
+DEFAULT_MANAGED_REGISTER = PROJECT_ROOT / "data" / "registers" / "valuation_register.xlsx"
+
 # Куди писати результат розрахунку — окремі колонки, без зачіпання клієнтської «Ціна продажу».
 RESULT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("Оцінка системи, грн", "estimate"),
@@ -60,11 +63,21 @@ def register_path_from_task(task: dict[str, Any] | None) -> Path | None:
             resolved = _resolve_path(raw)
             if resolved:
                 return resolved
-    return register_path_from_env()
+    env = register_path_from_env()
+    if env:
+        return env
+    # Керований реєстр, завантажений через UI (якщо env не задано).
+    return DEFAULT_MANAGED_REGISTER if DEFAULT_MANAGED_REGISTER.exists() else None
 
 
 def register_path_from_env() -> Path | None:
     return _resolve_path(os.environ.get(ENV_REGISTER_PATH))
+
+
+def register_path_default() -> Path:
+    """Канонічний шлях керованого реєстру (куди пише UI-завантажувач і звідки
+    читає резолвер): env-шлях, якщо задано, інакше дефолт у data/registers."""
+    return register_path_from_env() or DEFAULT_MANAGED_REGISTER
 
 
 def load_register(path: Path) -> list[RegisterEntry]:

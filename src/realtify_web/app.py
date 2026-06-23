@@ -501,6 +501,69 @@ def report_style_spec() -> dict[str, Any]:
     return report_styles.load_style_spec()
 
 
+def _register_status() -> dict[str, Any]:
+    from datetime import datetime as _dt
+
+    from realtify import valuation_register as vreg
+    path = vreg.register_path_default()
+    if not path or not path.exists():
+        return {"exists": False}
+    entries = vreg.load_register(path)
+    dates = sorted(e.valuation_date for e in entries if e.valuation_date)
+    return {
+        "exists": True,
+        "filename": path.name,
+        "entries": len(entries),
+        "updated": _dt.fromtimestamp(path.stat().st_mtime).strftime("%d.%m.%Y %H:%M"),
+        "date_from": dates[0].strftime("%d.%m.%Y") if dates else None,
+        "date_to": dates[-1].strftime("%d.%m.%Y") if dates else None,
+    }
+
+
+@app.get("/api/valuation-register")
+def get_valuation_register() -> dict[str, Any]:
+    """Статус керованого реєстру дат оцінки (джерело дати оцінки/звіту)."""
+    return _register_status()
+
+
+@app.post("/api/valuation-register")
+async def upload_valuation_register(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Оновлення реєстру дат оцінки (раз на місяць). Валідує через load_register,
+    робить бекап поточного й атомарно замінює канонічний файл (env-шлях)."""
+    import tempfile
+
+    from realtify import valuation_register as vreg
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="Файл реєстру обов'язковий.")
+    if Path(file.filename).suffix.lower() not in {".xlsx", ".xlsm"}:
+        raise HTTPException(status_code=400, detail="Очікується Excel .xlsx (перезбережіть .xls як .xlsx).")
+    tmp_dir = Path(tempfile.mkdtemp(prefix="vreg_"))
+    try:
+        tmp = tmp_dir / _safe_upload_name(file.filename, "register.xlsx")
+        await _save_upload(file, tmp)
+        entries = vreg.load_register(tmp)
+        if not entries:
+            raise HTTPException(
+                status_code=400,
+                detail="У файлі не знайдено жодного рядка реєстру. Перевірте заголовки колонок: «№ квартири», «дата оцінки», «адреса».",
+            )
+        dest = vreg.register_path_default()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            backup = dest.with_name(f"{dest.stem}.backup{dest.suffix}")
+            try:
+                shutil.copy2(dest, backup)
+            except Exception:  # noqa: BLE001 — бекап не критичний
+                pass
+        shutil.move(str(tmp), str(dest))
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    status = _register_status()
+    status["ok"] = True
+    status["original_name"] = file.filename
+    return status
+
+
 def _object_dirs(output_dir: Path) -> list[Path]:
     if not output_dir.exists():
         return []
