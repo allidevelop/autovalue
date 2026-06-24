@@ -86,8 +86,14 @@ def koza_apartment_values(text: str) -> dict[str, Any]:
     v["valuation_date"] = m.group(1).strip() if m else None
     m = re.search(r"Дата складання звіту:\s*([^\n]+)", text)
     v["report_date"] = m.group(1).strip() if m else None
-    m = re.search(r"Ринкова вартість[^\d]*([\d\s]+[,.]\d{2})", text)
-    v["market_value"] = m.group(1).strip() if m else None
+    m = re.search(r"Ринкова вартість[^\d(]*([\d  ]+[,.]\d{2})\s*\(([^)]+)\)", text)
+    if m:
+        v["market_value"] = m.group(1).strip()
+        v["market_value_words"] = m.group(2).strip()
+    else:
+        m2 = re.search(r"Ринкова вартість[^\d(]*([\d  ]+[,.]\d{2})", text)
+        v["market_value"] = m2.group(1).strip() if m2 else None
+        v["market_value_words"] = None
     m = re.search(r"Індексний номер витягу:\s*([0-9]+)", text)
     v["extract_index_number"] = m.group(1) if m else None
     return v
@@ -224,21 +230,49 @@ def _format_uk_date(d) -> str:
     return f"{d.day:02d} {months[d.month - 1]} {d.year} року"
 
 
+def _set_para_text(p, text: str) -> None:
+    if not p.runs:
+        return
+    p.runs[0].text = text
+    for r in p.runs[1:]:
+        r.text = ""
+
+
 def _set_extract_ref(doc, new_ref: str) -> None:
-    """Оновлює реквізит витяга у фразі «…про реєстрацію прав власності № … від … р.»:
-    new_ref непорожнє → ставимо новий № (нової квартири); порожнє → прибираємо
-    (опція клієнта; справжній номер усе одно видно на вклеєному скані витяга)."""
-    pat = re.compile(r"(прав власності)\s*№\s*\d[\d  ]*(?:\s*від\s+[\d.  ]+р?\.?)?", re.IGNORECASE)
-    tail = f" {new_ref}" if new_ref else ""
+    """Оновлює реквізит витяга «…про реєстрацію прав власності № … від … р.»:
+    new_ref непорожнє → новий № (нової квартири); порожнє → прибираємо (опція клієнта;
+    справжній номер усе одно видно на скані витяга). Обробляє і випадок, коли «№ … р.»
+    лежить ОКРЕМИМ абзацом одразу після «…прав власності» (часто так у козах)."""
+    NB = " "
+    in_pat = re.compile(r"(прав власності)\s*№\s*\d[\d " + NB + r"]*(?:\s*від\s+[\d." + NB + r" ]+р?\.?)?", re.IGNORECASE)
+    alone_pat = re.compile(r"^\s*№\s*\d{6,}(?:\s+від\s+[\d." + NB + r" ]+р?\.?)?\s*$")
+    tail = (" " + new_ref) if new_ref else ""
+    paras = list(_iter_paragraphs(doc))
+    for i, p in enumerate(paras):
+        if not p.runs:
+            continue
+        full = "".join(r.text for r in p.runs)
+        new = in_pat.sub(lambda m: m.group(1) + tail, full)
+        if new != full:
+            _set_para_text(p, new)
+            continue
+        if alone_pat.match(full.strip()) and i > 0:
+            prev = "".join(r.text for r in paras[i - 1].runs)
+            if "власності" in prev:
+                _set_para_text(p, new_ref if new_ref else "")
+
+
+def _regex_sub_doc(doc, pat, repl) -> None:
+    """Толерантна regex-заміна по всьому документу (включно з таблицями). Для значень,
+    де між міткою й числом може бути кілька пробілів/табів (площа/№ у клітинках таблиць),
+    чого не ловить точкова string-заміна. Абзац зі збігом склеюється в перший run."""
     for p in _iter_paragraphs(doc):
         if not p.runs:
             continue
         full = "".join(r.text for r in p.runs)
-        new = pat.sub(lambda m: m.group(1) + tail, full)
+        new = pat.sub(repl, full)
         if new != full:
-            p.runs[0].text = new
-            for r in p.runs[1:]:
-                r.text = ""
+            _set_para_text(p, new)
 
 
 def clone_koza(koza_path: Path, out_path: Path, *, old: dict, new: dict,
@@ -279,6 +313,9 @@ def clone_koza(koza_path: Path, out_path: Path, *, old: dict, new: dict,
         # вартість
         if old.get("market_value") and new.get("market_value"):
             repls.append((str(old["market_value"]), str(new["market_value"])))
+        # вартість прописом — інакше число й слова в дужках розходяться
+        if old.get("market_value_words") and new.get("market_value_words"):
+            repls.append((str(old["market_value_words"]), str(new["market_value_words"])))
         # кімнатність: стем кози (як витягнуто, з її апострофом) → новий стем.
         # Випадок (кімнатної/кімнатна) — у закінченні, його не чіпаємо.
         os_, ns_ = old.get("rooms_word_stem"), new.get("rooms_word_stem")
@@ -288,6 +325,15 @@ def clone_koza(koza_path: Path, out_path: Path, *, old: dict, new: dict,
 
         for p in _iter_paragraphs(doc):
             _replace_in_paragraph(p, repls)
+
+        # Друга хвиля — толерантний regex (для таблиць, де між міткою й числом
+        # кілька пробілів/таб): площа й № квартири, які точкова заміна не дістала.
+        if old.get("area") and new.get("area"):
+            _regex_sub_doc(doc, re.compile(rf"(площею\s+){re.escape(str(old['area']))}"),
+                           rf"\g<1>{new['area']}")
+        if old.get("apartment") and new.get("apartment"):
+            _regex_sub_doc(doc, re.compile(rf"(кварти\w*\s*№?\s*){re.escape(str(old['apartment']))}(?=\D|$)"),
+                           rf"\g<1>{new['apartment']}")
 
         if extract_ref is not None:
             _set_extract_ref(doc, extract_ref)
@@ -418,7 +464,8 @@ def build_report_via_koza(obj_dir: Path, out_dir: Path, *,
     obj_dir = Path(obj_dir)
     intake = _load_intake(_resolve_optional(obj_dir / "intake.json"))
     task = _load_yaml(_resolve_optional(obj_dir / "task.generated.yaml"))
-    candidates = _load_candidates(_resolve_optional(obj_dir / "candidates.json"))
+    cand_path = obj_dir / "candidates.json"
+    candidates = _load_candidates(cand_path) if cand_path.exists() else []
     excels = sorted(obj_dir.glob("*_filled.xls")) or sorted(obj_dir.glob("*.xls"))
     excel_path = excels[0] if excels else None
 
@@ -449,10 +496,15 @@ def build_report_via_koza(obj_dir: Path, out_dir: Path, *,
 
     new_area_num = _num(values.get("total_area_m2"))
     koza_val, koza_area = _num(old.get("market_value")), _num(old.get("area"))
-    market_value = None
+    market_value = market_value_words = None
     if koza_val and koza_area and new_area_num:
-        v = round(koza_val / koza_area * new_area_num, -2)
-        market_value = f"{v:,.2f}".replace(",", " ").replace(".", ",")
+        vv = round(koza_val / koza_area * new_area_num, -2)
+        market_value = f"{vv:,.2f}".replace(",", " ").replace(".", ",")
+        try:
+            from realtify.excel_summary import number_to_ukrainian_words
+            market_value_words = number_to_ukrainian_words(int(vv))
+        except Exception:  # noqa: BLE001
+            market_value_words = None
 
     ctx = resolve_valuation_context(task, excel_path=excel_path)
     new = {
@@ -462,6 +514,7 @@ def build_report_via_koza(obj_dir: Path, out_dir: Path, *,
         "valuation_date": _format_uk_date(ctx.valuation_date),
         "report_date": _format_uk_date(ctx.valuation_date),
         "market_value": market_value,
+        "market_value_words": market_value_words,
         "extract_index_number": values.get("extract_index_number") or None,
     }
     if not new["apartment"]:
