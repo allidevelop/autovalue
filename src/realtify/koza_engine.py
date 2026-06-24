@@ -86,12 +86,12 @@ def koza_apartment_values(text: str) -> dict[str, Any]:
     v["valuation_date"] = m.group(1).strip() if m else None
     m = re.search(r"Дата складання звіту:\s*([^\n]+)", text)
     v["report_date"] = m.group(1).strip() if m else None
-    m = re.search(r"Ринкова вартість[^\d(]*([\d  ]+[,.]\d{2})\s*\(([^)]+)\)", text)
+    m = re.search(r"Ринкова вартість[^\d(]*(\d[\d  ]*[,.]\d{2})\s*\(([^)]+)\)", text)
     if m:
         v["market_value"] = m.group(1).strip()
         v["market_value_words"] = m.group(2).strip()
     else:
-        m2 = re.search(r"Ринкова вартість[^\d(]*([\d  ]+[,.]\d{2})", text)
+        m2 = re.search(r"Ринкова вартість[^\d(]*(\d[\d  ]*[,.]\d{2})", text)
         v["market_value"] = m2.group(1).strip() if m2 else None
         v["market_value_words"] = None
     m = re.search(r"Індексний номер витягу:\s*([0-9]+)", text)
