@@ -564,6 +564,34 @@ async def upload_valuation_register(file: UploadFile = File(...)) -> dict[str, A
     return status
 
 
+@app.get("/api/koza-base")
+def get_koza_base() -> dict[str, Any]:
+    """Статус бази шаблонів-козлів (домів/файлів)."""
+    from realtify import koza_engine
+    return koza_engine.index_status()
+
+
+@app.post("/api/koza-base")
+async def upload_koza(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Завантаження нового шаблону-кози (готового звіту) у бібліотеку + індекс по дому."""
+    from starlette.concurrency import run_in_threadpool
+
+    from realtify import koza_engine
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="Файл шаблону (.doc/.docx) обов'язковий.")
+    if Path(file.filename).suffix.lower() not in {".doc", ".docx"}:
+        raise HTTPException(status_code=400, detail="Очікується Word-звіт (.doc/.docx).")
+    koza_engine.REPORTS_LIBRARY.mkdir(parents=True, exist_ok=True)
+    dest = koza_engine.REPORTS_LIBRARY / _safe_upload_name(file.filename, "koza.doc")
+    await _save_upload(file, dest)
+    key = await run_in_threadpool(koza_engine.add_koza, dest)
+    status = koza_engine.index_status()
+    status["ok"] = bool(key)
+    if not key:
+        status["warning"] = "Не вдалося визначити адресу дому зі звіту — файл додано в бібліотеку без індексації."
+    return status
+
+
 def _object_dirs(output_dir: Path) -> list[Path]:
     if not output_dir.exists():
         return []
@@ -836,6 +864,13 @@ def _report_v2_pdf_enabled() -> bool:
     return True
 
 
+def _report_koza_enabled() -> bool:
+    # Коза-движок (генерація клонуванням готового звіту дому). За замовч. УВІМК;
+    # якщо кози для дому немає — build_report_via_koza поверне None → звичайний шлях.
+    raw = os.getenv("REALTIFY_REPORT_KOZA", "").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
 def _render_report_v2(job_id: str, obj_dir: Path, review_dir: Path, label: str) -> list[WebArtifact]:
     """Рендерить data-driven звіт v2 (.docx[+.pdf]) як ПЕРВИННИЙ артефакт об'єкта.
     mode='clean' — без підсвітки походження; рендер НЕ блокує на незаповнених
@@ -875,6 +910,7 @@ def _package_result(job_id: str, result: BatchWorkflowResult) -> list[WebArtifac
     review_dir.mkdir(parents=True, exist_ok=True)
     artifacts: list[WebArtifact] = []
     v2_on = _report_v2_enabled()
+    koza_on = _report_koza_enabled()
 
     if result.report_path.exists():
         batch_report_copy = review_dir / "batch_report.md"
@@ -883,7 +919,25 @@ def _package_result(job_id: str, result: BatchWorkflowResult) -> list[WebArtifac
 
     for index, item in enumerate(result.objects, start=1):
         label = _object_label(index, item.apartment, item.extract_page)
-        if v2_on:
+        # Коза-движок: якщо для дому є готовий звіт-шаблон — генеруємо КЛОНУВАННЯМ кози
+        # (контент дому/формат/аналоги — як у клієнта), підставляючи дані квартири.
+        koza_out = None
+        if koza_on:
+            try:
+                from realtify import koza_engine
+                koza_out = koza_engine.build_report_via_koza(
+                    item.output_dir, review_dir,
+                    progress=lambda m: _append_event(job_id, m))
+            except Exception as exc:  # noqa: BLE001 — коза не має валити пакет
+                _append_event(job_id, f"Коза-звіт ({label}): помилка — {exc}. Фолбек на звичайний пайплайн.")
+        if koza_out and koza_out.exists():
+            artifacts.append(WebArtifact(name=koza_out.name, path=koza_out, kind="word"))
+            _append_event(job_id, f"Звіт згенеровано з кози дому: {koza_out.name}")
+            if item.word_report_path and item.word_report_path.exists():
+                legacy = review_dir / f"valuation_report_{label}_legacy.docx"
+                shutil.copy2(item.word_report_path, legacy)
+                artifacts.append(WebArtifact(name=legacy.name, path=legacy, kind="word"))
+        elif v2_on:
             # v2 — первинний; legacy зберігаємо як вторинний *_legacy.docx (одна реліз-ітерація).
             v2_artifacts = _render_report_v2(job_id, item.output_dir, review_dir, label)
             artifacts.extend(v2_artifacts)

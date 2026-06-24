@@ -16,7 +16,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from realtify.analog_cache import address_key
+from realtify.analog_cache import address_key, building_match_key
 from realtify.paths import PROJECT_ROOT
 
 ENV_REGISTER_PATH = "REALTIFY_VALUATION_REGISTER"
@@ -231,7 +231,9 @@ def _resolve_path(raw: Any) -> Path | None:
 def _building_key(city: str | None, address: str | None) -> str:
     if not address:
         return ""
-    return address_key(city=city, address=address, property_type=None)
+    # Толерантний матч-ключ (знімає область/тип вулиці/дублі міста) — інакше
+    # «Львівська обл., м. Львів, вулиця Хмельницького…» не збігалося з реєстром.
+    return building_match_key(city=city, address=address)
 
 
 def normalize_apartment(value: Any) -> str:
