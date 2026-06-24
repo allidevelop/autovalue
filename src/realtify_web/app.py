@@ -1020,13 +1020,13 @@ def _web_pdf_dpi() -> int:
     if raw_value:
         try:
             value = int(raw_value)
-            if 50 <= value <= 300:
+            if 50 <= value <= 600:
                 return value
         except ValueError:
             pass
-    # 110 dpi занадто мало для дрібного тексту витяга (OCR плутав вулицю/площу,
-    # напр. «Ростиславська»→«Ростполавська»). 200 dpi — надійне розпізнавання.
-    return 200
+    # 110 dpi занадто мало; 200 dpi плутав тонкі цифри (площа «43,1»→«43.)», № витяга
+    # 8↔3). 300 dpi + user_defined_dpi у tesseract — помітно точніше розпізнавання цифр.
+    return 300
 
 
 def _notify_job_finished(job_id: str) -> None:

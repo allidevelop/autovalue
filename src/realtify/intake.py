@@ -320,7 +320,7 @@ def _extract_or_ocr_pdf(
             emit_progress(progress, f"PDF intake: page {page}/{end} OCR rendering.")
             images = render_pdf_pages(pdf_path, image_dir, first_page=page, last_page=page, dpi=dpi)
             try:
-                text = ocr_image(images[0])
+                text = ocr_image(images[0], dpi=dpi)
             except OcrTimeoutError as exc:
                 emit_progress(progress, f"PDF intake: page {page}/{end} OCR timeout, page skipped: {exc}")
                 text = ""

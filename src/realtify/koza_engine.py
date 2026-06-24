@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -223,8 +224,25 @@ def _format_uk_date(d) -> str:
     return f"{d.day:02d} {months[d.month - 1]} {d.year} року"
 
 
+def _set_extract_ref(doc, new_ref: str) -> None:
+    """Оновлює реквізит витяга у фразі «…про реєстрацію прав власності № … від … р.»:
+    new_ref непорожнє → ставимо новий № (нової квартири); порожнє → прибираємо
+    (опція клієнта; справжній номер усе одно видно на вклеєному скані витяга)."""
+    pat = re.compile(r"(прав власності)\s*№\s*\d[\d  ]*(?:\s*від\s+[\d.  ]+р?\.?)?", re.IGNORECASE)
+    tail = f" {new_ref}" if new_ref else ""
+    for p in _iter_paragraphs(doc):
+        if not p.runs:
+            continue
+        full = "".join(r.text for r in p.runs)
+        new = pat.sub(lambda m: m.group(1) + tail, full)
+        if new != full:
+            p.runs[0].text = new
+            for r in p.runs[1:]:
+                r.text = ""
+
+
 def clone_koza(koza_path: Path, out_path: Path, *, old: dict, new: dict,
-               scans: dict | None = None, progress=None) -> Path:
+               scans: dict | None = None, progress=None, extract_ref: str | None = None) -> Path:
     """Клонує козу (.doc/.docx) у out_path (.docx), підставляючи дані нової квартири.
     old/new — словники значень кози й нової квартири (apartment, area, rooms_word_stem,
     valuation_date, report_date, market_value, extract_index_number).
@@ -261,9 +279,6 @@ def clone_koza(koza_path: Path, out_path: Path, *, old: dict, new: dict,
         # вартість
         if old.get("market_value") and new.get("market_value"):
             repls.append((str(old["market_value"]), str(new["market_value"])))
-        # № витягу
-        if old.get("extract_index_number") and new.get("extract_index_number"):
-            repls.append((str(old["extract_index_number"]), str(new["extract_index_number"])))
         # кімнатність: стем кози (як витягнуто, з її апострофом) → новий стем.
         # Випадок (кімнатної/кімнатна) — у закінченні, його не чіпаємо.
         os_, ns_ = old.get("rooms_word_stem"), new.get("rooms_word_stem")
@@ -273,6 +288,9 @@ def clone_koza(koza_path: Path, out_path: Path, *, old: dict, new: dict,
 
         for p in _iter_paragraphs(doc):
             _replace_in_paragraph(p, repls)
+
+        if extract_ref is not None:
+            _set_extract_ref(doc, extract_ref)
 
         if scans:
             try:
@@ -468,7 +486,12 @@ def build_report_via_koza(obj_dir: Path, out_dir: Path, *,
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / _koza_output_name(
             koza, old.get("apartment"), new["apartment"], fallback_stem=fallback_stem)
-        clone_koza(koza, out_path, old=old, new=new, scans=scans, progress=progress)
+        # № витяга: за замовч. ставимо новий реквізит (OCR 300dpi тепер точний);
+        # REALTIFY_KOZA_EXTRACT_REF=drop — прибрати (скан усе одно показує номер).
+        drop = os.getenv("REALTIFY_KOZA_EXTRACT_REF", "").strip().lower() in {"drop", "off", "0", "no", "remove"}
+        extract_ref = "" if drop else (values.get("extract_reference") or "")
+        clone_koza(koza, out_path, old=old, new=new, scans=scans, progress=progress,
+                   extract_ref=extract_ref)
     # Перевіряємо, що клон відкривається (інакше не віддаємо як первинний артефакт).
     try:
         from docx import Document as _Doc

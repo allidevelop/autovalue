@@ -28,7 +28,8 @@ def configure_tesseract() -> Path | None:
     return tessdata_dir
 
 
-def ocr_image(image_path: Path, *, lang: str | None = None, timeout_seconds: int | None = None) -> str:
+def ocr_image(image_path: Path, *, lang: str | None = None, timeout_seconds: int | None = None,
+              dpi: int | None = None) -> str:
     tessdata_dir = configure_tesseract()
     timeout = timeout_seconds or _ocr_timeout_seconds()
     language = lang or _ocr_lang()
@@ -36,6 +37,10 @@ def ocr_image(image_path: Path, *, lang: str | None = None, timeout_seconds: int
     if tessdata_dir:
         config_parts.append(f'--tessdata-dir "{tessdata_dir}"')
     config_parts.extend(["--psm", str(_ocr_psm())])
+    # Повідомляємо tesseract реальний DPI зображення — інакше масштабує наосліп,
+    # через що тонкі гліфи (1↔), 8↔3) плутаються. Точність розпізнавання цифр зростає.
+    if dpi and dpi > 0:
+        config_parts.extend(["-c", f"user_defined_dpi={int(dpi)}"])
     with Image.open(image_path) as image:
         try:
             return pytesseract.image_to_string(
