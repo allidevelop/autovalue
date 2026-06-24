@@ -91,7 +91,7 @@ def build_e2e_report(pdf_path: Path | None = None, *, dpi: int = 300, stamp: str
     out_rooms = out_find(r"(одно|дво|три|чотири|п['’]?яти|шести)кімнатн")
     out_dov = out_find(r"Дата оцінки:\s*([^\n]+)")
     out_dsk = out_find(r"Дата складання звіту:\s*([^\n]+)")
-    out_val = out_find(r"Ринкова вартість[^\d(]*([\d  ]+[,.]\d{2})")
+    out_val = out_find(r"становить\s*(\d[\d  ]*[,.]\d{2})")
     out_words = out_find(r"Ринкова вартість[^()]*\(([^)]+)\)")
     out_ref = out_find(r"реєстрацію прав власності\s*(№[^\n]{0,40})", "(прибрано — на скані)")
 
