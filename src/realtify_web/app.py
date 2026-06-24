@@ -592,6 +592,40 @@ async def upload_koza(file: UploadFile = File(...)) -> dict[str, Any]:
     return status
 
 
+@app.get("/api/e2e-test", response_class=HTMLResponse)
+def get_e2e_test() -> HTMLResponse:
+    """E2E-самотест коза-клон генерації: сторінка «вхід (з документів) vs вихід (у звіті)»."""
+    from realtify import e2e_report
+    btn = ("<form method=post style='margin-top:12px'><button "
+           "style='padding:8px 16px;font-size:14px;border-radius:8px;border:none;background:#2563eb;color:#fff'>"
+           "Запустити E2E-тест заново</button></form>")
+    if e2e_report.E2E_HTML.exists():
+        body = e2e_report.E2E_HTML.read_text(encoding="utf-8")
+        return HTMLResponse(body.replace("</body>", btn + "</body>"))
+    status = e2e_report.E2E_STATUS.read_text(encoding="utf-8") if e2e_report.E2E_STATUS.exists() else "none"
+    msg = {"running": "Тест виконується (генерація звіту з витяга ~2-3 хв)… оновіть сторінку трохи згодом.",
+           "none": "Тест ще не запускали."}.get(status, status)
+    return HTMLResponse(f"<html><head><meta charset=utf-8></head><body style='font-family:system-ui;padding:28px'>"
+                        f"<h2>E2E-самотест коза-клон</h2><p>{html.escape(msg)}</p>{btn}</body></html>")
+
+
+@app.post("/api/e2e-test", response_class=HTMLResponse)
+def run_e2e_test() -> HTMLResponse:
+    from realtify import e2e_report
+    e2e_report._set_status("running")
+
+    def _run() -> None:
+        try:
+            e2e_report.build_e2e_report(stamp=_now_iso())
+        except Exception as exc:  # noqa: BLE001
+            e2e_report._set_status(f"error: {exc}")
+
+    threading.Thread(target=_run, daemon=True, name="e2e-test").start()
+    return HTMLResponse("<html><head><meta charset=utf-8><meta http-equiv=refresh content='8'></head>"
+                        "<body style='font-family:system-ui;padding:28px'><h2>E2E-тест запущено…</h2>"
+                        "<p>Генерація звіту з витяга (~2-3 хв). Сторінка оновиться автоматично.</p></body></html>")
+
+
 def _object_dirs(output_dir: Path) -> list[Path]:
     if not output_dir.exists():
         return []
